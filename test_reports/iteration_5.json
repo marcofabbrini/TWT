@@ -1,0 +1,28 @@
+{
+  "summary": "TWT Phase 2 retest after the tie-break change in _renormalize_stop_attractions (moved items win order ties). Ran the full backend regression: backend_test.py (Phase 1) + phase2_test.py (Phase 2) = 99 tests, 98 passed. The previously failing test_move_to_position_zero_before_older_item now PASSES; the whole TestOrderNormalization class passes except one NEW edge case I added per request. Also ran a Mongo sanity scan for duplicate/non-contiguous order values.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/trips/{trip_id}/attractions/reorder", "issue": "Multi-move batch into a stop that already holds older items interleaves the moved block. Scenario: stop B = [X(0), Y(1)] (older), move M0->B new_order=0 and M1->B new_order=1 in one request. Expected [M0,M1,X,Y]; actual [M0(0), X(1), M1(2), Y(3)]. Cause: renormalize sorts by (order, moved-first, created_at), so each moved item only wins its own tie and the existing items are not shifted past the whole moved block. Fix idea: when a batch of moves targets a stop, insert the moved items as a contiguous block at the requested offsets (e.g. assign moved order = new_order*2, existing = order*2+1, then renumber), or explicitly shift existing items by the number of moved items landing at <= their position."},
+      {"endpoint": "data (legacy)", "issue": "Pre-existing legacy trip 'Test Phase 2' (trip_2c01e705da5d454c, created 2026-08-20) still holds duplicate order 0 (Colosseo/Uffizi in stop Firenze) and a non-contiguous order 1 in stop Roma. Not produced by the current code path — leftover from before the normalization fix. Consider a one-off backfill/renormalization migration."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/phase2_test.py", "/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml", "/app/test_reports/dup_order_check.py"],
+  "action_items": [
+    "Handle contiguous multi-move insertion in reorder_attractions/_renormalize_stop_attractions so a batch of moved items dropped at consecutive positions stays contiguous (see minor issue #1).",
+    "Optional: run a one-time renormalization over existing attractions to clean legacy duplicate orders in trip_2c01e705da5d454c."
+  ],
+  "critical_code_review_comments": [
+    "_renormalize_stop_attractions tie-break (order, moved-first, created_at) fixes the single-move case but is not sufficient for batch moves; the ranking should account for how many moved items precede an existing item.",
+    "to_list(2000) cap in _renormalize_stop_attractions is a silent truncation risk for very large stops — prefer paging or an explicit guard."
+  ],
+  "updated_files": ["/app/backend/tests/phase2_test.py", "/app/test_reports/dup_order_check.py", "/app/test_reports/inspect_orphans.py"],
+  "success_rate": {"backend": "99% (98/99)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Tests create/delete their own TEST_* trips, stops, attractions via dev-login alice@twt.app; all cleaned up by fixtures.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "dev-login alice@twt.app / bob@twt.app (ENV=dev)",
+  "context_for_next_testing_agent": "phase2_test.py now has 10 tests in TestOrderNormalization (added test_two_moves_into_stop_with_older_items and test_move_to_end_lands_last). Total suite = 99 tests. Only test_two_moves_into_stop_with_older_items fails (batch multi-move interleaving). Run: cd /app/backend && python -m pytest tests/backend_test.py tests/phase2_test.py -q. Mongo sanity: python /app/test_reports/dup_order_check.py.",
+  "rca_of_the_issue": "The iteration_4 defect (moved item losing an order tie to an older item) is FIXED: the moved-first tie-break makes the single-move drop land at the requested slot; test_move_to_position_zero_before_older_item passes and test_move_to_end_lands_last passes. Residual defect is a different, narrower case: with N>1 moves into the same stop, each moved item only beats the existing item that shares its exact order value, so existing items get interleaved between the moved block instead of being pushed after it."
+}

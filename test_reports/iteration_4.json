@@ -1,0 +1,28 @@
+{
+  "summary": "Backend-only fix-cycle verification of order normalization (0..N-1 after every mutation). Added TestOrderNormalization (8 tests) to /app/backend/tests/phase2_test.py covering cross-stop partial move, same-stop reorder, attraction delete, stop delete, 422 no-mutation, non-contiguous new_order, untouched-stop isolation, plus a tie-break edge case. Full suite: 97 tests, 96 passed / 1 failed. All 5 requested fixes VERIFIED via both API GET and direct Mongo reads (pymongo). Regression: all pre-existing 89 tests still pass. Quick frontend smoke: landing + dev-login(alice) + /dashboard render fine, no console errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/trips/{trip_id}/attractions/reorder", "issue": "Moved attraction does not always land at the requested new_order when the target stop already has an item with that same order. _renormalize_stop_attractions() sorts by (order, created_at), so the OLDER document wins the tie. Repro: stop B has 'Older'(order 0, created first), stop A has 'Newer' (created later); reorder move {Newer -> B, new_order 0} => result [Older(0), Newer(1)] instead of [Newer(0), Older(1)]. Orders are contiguous (the reported bug IS fixed), but the drop position is wrong for a drag-to-top when the target item is older. The user's exact Colosseo/Uffizi scenario passes only because Colosseo happened to be created before Uffizi."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/phase2_test.py", "/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Make the drop position deterministic in reorder: before normalizing, shift existing (non-moved) attractions in the target stop with order >= new_order by +1, or write moved items with order = new_order - 0.5 and let normalization collapse them; alternatively sort the normalization by (order, is_moved DESC, created_at) so moved items win ties."
+  ],
+  "critical_code_review_comments": [
+    "attractions.py:_renormalize_stop_attractions uses created_at as the only tie-breaker; that is not a valid proxy for user intent on a cross-stop drop (see minor issue). Contiguity is guaranteed, ordering intent is not.",
+    "reorder_attractions returns ALL attractions of the trip sorted by 'order' only (line 200) — across stops the ordering is interleaved/ambiguous; sort by (stop order/stop_id, order) or return only touched stops.",
+    "Normalization loop issues one find + one bulk_write per touched stop sequentially (N round trips). Fine at current scale; consider a single aggregation if stops grow.",
+    "reorder is not transactional: bulk_write then N normalization writes; a crash mid-way can leave duplicate orders. Consider a Mongo multi-document transaction (replica set required) or a single bulk_write with the final normalized values computed in app code."
+  ],
+  "updated_files": ["/app/backend/tests/phase2_test.py"],
+  "success_rate": {"backend": "99% (96/97)", "frontend": "smoke only - passed"},
+  "seed_data_creation": "Ephemeral trips/stops/attractions prefixed TEST_NORM_*, deleted in fixture teardown; one leftover Mongo doc-order mutation was on a test-created stop that was deleted.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "dev-login alice@twt.app / bob@twt.app (ENV=dev)",
+  "context_for_next_testing_agent": "phase2_test.py now has TestOrderNormalization at the end (8 tests). The only failing test is test_move_to_position_zero_before_older_item — it asserts the intended semantics of a drag-to-top onto an older item; keep it failing until reorder applies drop-position intent. Run: cd /app/backend && python -m pytest tests/ -v (pytest.ini already sets -n 2 --dist loadscope).",
+  "rca_of_the_issue": "Original bug (non-contiguous / duplicate order after cross-stop move) is fixed: reorder captures source_stop_ids before bulk_write and renormalizes source ∪ target; delete_attraction renormalizes its stop; delete_stop renormalizes trip stops. Verified in Mongo — no duplicate order within any (trip_id, stop_id) and stop orders contiguous after middle-stop delete. Residual defect: the normalization's (order, created_at) sort resolves the temporary duplicate order created by the move in favour of the older doc, so a moved item can be pushed one slot down from the requested position."
+}

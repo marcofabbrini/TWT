@@ -121,6 +121,23 @@ async def delete_stop(trip_id: str, stop_id: str, current_user: dict = Depends(r
         raise HTTPException(status_code=404, detail="Stop not found")
     await db.attractions.delete_many({"trip_id": trip_id, "stop_id": stop_id})
     await db.stops.delete_one({"stop_id": stop_id})
+
+    # Renormalize remaining stops.order to 0..N-1 (tie-break on created_at).
+    remaining = await db.stops.find(
+        {"trip_id": trip_id},
+        {"_id": 0, "stop_id": 1, "order": 1, "created_at": 1},
+    ).sort([("order", ASCENDING), ("created_at", ASCENDING)]).to_list(1000)
+    ops = [
+        UpdateOne(
+            {"stop_id": d["stop_id"], "trip_id": trip_id},
+            {"$set": {"order": i}},
+        )
+        for i, d in enumerate(remaining)
+        if d.get("order") != i
+    ]
+    if ops:
+        await db.stops.bulk_write(ops, ordered=False)
+
     logger.info("stops.delete trip=%s stop=%s", trip_id, stop_id)
     return None
 

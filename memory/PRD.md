@@ -58,9 +58,10 @@ Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) 
 - Dashboard: glass trip cards, empty state, create modal, delete confirmation.
 - Landing hero + feature grid.
 
-### Phase 2 (2026-02, verified 89/89 backend + all frontend, 0 orphans)
+### Phase 2 (2026-02, verified 104/104 backend + all frontend, 0 orphans, 0 duplicate orders)
 - Stops CRUD (create/list/patch/delete) with cascade on stop delete and full-permutation reorder.
-- Attractions CRUD with atomic cross-stop reorder (pre-validation + bulk_write).
+- Attractions CRUD with atomic cross-stop reorder (computes canonical final layout in Python + single bulk_write).
+- **Order canonicalization**: after every mutation (reorder, delete-attraction, delete-stop) orders are guaranteed contiguous 0..N-1 within each container; multi-item batch moves stay contiguous.
 - Timeline UI with numbered stop bubbles, transport icon, KM chip between stops (placeholder), sticky trip sub-header with role badge and totals placeholders.
 - @dnd-kit drag & drop for attractions: same-stop reorder + cross-stop move; optimistic UI with rollback on failure.
 - Role-gated UI: viewer sees no edit buttons/drag handles.

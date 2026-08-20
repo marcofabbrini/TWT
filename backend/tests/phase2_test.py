@@ -726,3 +726,346 @@ class TestPhase2Fixes:
             assert r3.json()["booking_link"] in (None, "")
         finally:
             alice.delete(f"{API}/trips/{tid}")
+
+
+# ── Order normalization after every mutation (iteration_4 bug fix) ──
+class TestOrderNormalization:
+    """After ANY mutation of an ordered container, order must be contiguous 0..N-1."""
+
+    @pytest.fixture(scope="class")
+    def norm_trip(self, alice):
+        r = alice.post(f"{API}/trips", json={
+            "title": f"TEST_NORM_{uuid.uuid4().hex[:6]}",
+            "home_currency": "EUR", "start_date": TRIP_START, "end_date": TRIP_END})
+        assert r.status_code in (200, 201), r.text
+        t = r.json()
+        yield t
+        alice.delete(f"{API}/trips/{t['trip_id']}")
+
+    # helpers ------------------------------------------------------
+    def _api_orders(self, alice, tid, sid):
+        r = alice.get(f"{API}/trips/{tid}/stops/{sid}/attractions")
+        assert r.status_code == 200, r.text
+        return [(a["name"], a["order"]) for a in r.json()]
+
+    def _mongo_orders(self, mongo, tid, sid):
+        docs = list(mongo.attractions.find(
+            {"trip_id": tid, "stop_id": sid}, {"_id": 0, "name": 1, "order": 1}
+        ).sort("order", 1))
+        return [(d["name"], d["order"]) for d in docs]
+
+    def _assert_contiguous(self, pairs, label):
+        orders = sorted(p[1] for p in pairs)
+        assert orders == list(range(len(pairs))), f"{label}: non-contiguous/duplicate orders {pairs}"
+
+    # FIX #1: cross-stop partial move ------------------------------
+    def test_cross_stop_partial_move_normalizes_source_and_target(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_StopA").json()["stop_id"]
+        b = mk_stop(alice, tid, title="TEST_NORM_StopB").json()["stop_id"]
+        colosseo = mk_att(alice, tid, a, name="Colosseo").json()
+        fori = mk_att(alice, tid, a, name="Fori").json()
+        uffizi = mk_att(alice, tid, b, name="Uffizi").json()
+        assert (colosseo["order"], fori["order"], uffizi["order"]) == (0, 1, 0)
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": colosseo["attraction_id"], "target_stop_id": b, "new_order": 0}]})
+        assert r.status_code == 200, r.text
+
+        api_a = self._api_orders(alice, tid, a)
+        api_b = self._api_orders(alice, tid, b)
+        assert api_a == [("Fori", 0)], api_a
+        assert api_b == [("Colosseo", 0), ("Uffizi", 1)], api_b
+        assert self._mongo_orders(mongo, tid, a) == [("Fori", 0)]
+        assert self._mongo_orders(mongo, tid, b) == [("Colosseo", 0), ("Uffizi", 1)]
+        self._assert_contiguous(api_a, "source stop")
+        self._assert_contiguous(api_b, "target stop")
+
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+        alice.delete(f"{API}/trips/{tid}/stops/{b}")
+
+    # FIX #2: same-stop reorder ------------------------------------
+    def test_same_stop_reorder_normalizes(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_Same").json()["stop_id"]
+        col = mk_att(alice, tid, a, name="Colosseo").json()
+        fori = mk_att(alice, tid, a, name="Fori").json()
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": fori["attraction_id"], "target_stop_id": a, "new_order": 0},
+            {"attraction_id": col["attraction_id"], "target_stop_id": a, "new_order": 1}]})
+        assert r.status_code == 200, r.text
+        api_a = self._api_orders(alice, tid, a)
+        assert api_a == [("Fori", 0), ("Colosseo", 1)], api_a
+        assert self._mongo_orders(mongo, tid, a) == [("Fori", 0), ("Colosseo", 1)]
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+
+    # FIX #3: delete attraction normalizes source stop -------------
+    def test_delete_attraction_normalizes(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        s = mk_stop(alice, tid, title="TEST_NORM_Del").json()["stop_id"]
+        a = mk_att(alice, tid, s, name="A").json()
+        b = mk_att(alice, tid, s, name="B").json()
+        c = mk_att(alice, tid, s, name="C").json()
+        assert (a["order"], b["order"], c["order"]) == (0, 1, 2)
+
+        d = alice.delete(f"{API}/trips/{tid}/attractions/{b['attraction_id']}")
+        assert d.status_code == 204, d.text
+        api = self._api_orders(alice, tid, s)
+        assert api == [("A", 0), ("C", 1)], api
+        assert self._mongo_orders(mongo, tid, s) == [("A", 0), ("C", 1)]
+        alice.delete(f"{API}/trips/{tid}/stops/{s}")
+
+    # FIX #4: delete stop normalizes remaining stops ---------------
+    def test_delete_stop_normalizes_stop_orders(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        s1 = mk_stop(alice, tid, title="TEST_NORM_S1").json()
+        s2 = mk_stop(alice, tid, title="TEST_NORM_S2").json()
+        s3 = mk_stop(alice, tid, title="TEST_NORM_S3").json()
+        assert [s1["order"], s2["order"], s3["order"]] == [0, 1, 2]
+
+        d = alice.delete(f"{API}/trips/{tid}/stops/{s2['stop_id']}")
+        assert d.status_code == 204, d.text
+        r = alice.get(f"{API}/trips/{tid}/stops")
+        assert r.status_code == 200
+        got = [(s["title"], s["order"]) for s in r.json()]
+        assert got == [("TEST_NORM_S1", 0), ("TEST_NORM_S3", 1)], got
+
+        mdocs = list(mongo.stops.find({"trip_id": tid}, {"_id": 0, "title": 1, "order": 1}).sort("order", 1))
+        assert [(d2["title"], d2["order"]) for d2 in mdocs] == [("TEST_NORM_S1", 0), ("TEST_NORM_S3", 1)]
+        assert mongo.stops.count_documents({"trip_id": tid, "stop_id": s2["stop_id"]}) == 0
+        alice.delete(f"{API}/trips/{tid}/stops/{s1['stop_id']}")
+        alice.delete(f"{API}/trips/{tid}/stops/{s3['stop_id']}")
+
+    # FIX #5: 422 validation does not mutate -----------------------
+    def test_invalid_reorder_422_no_mutation(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        s = mk_stop(alice, tid, title="TEST_NORM_422").json()["stop_id"]
+        a = mk_att(alice, tid, s, name="A").json()
+        b = mk_att(alice, tid, s, name="B").json()
+        before = self._mongo_orders(mongo, tid, s)
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": b["attraction_id"], "target_stop_id": s, "new_order": 0},
+            {"attraction_id": "att_does_not_exist", "target_stop_id": s, "new_order": 1}]})
+        assert r.status_code == 422, r.text
+        assert self._mongo_orders(mongo, tid, s) == before
+
+        r2 = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": a["attraction_id"], "target_stop_id": "stop_nope", "new_order": 0}]})
+        assert r2.status_code == 422, r2.text
+        assert self._mongo_orders(mongo, tid, s) == before
+        alice.delete(f"{API}/trips/{tid}/stops/{s}")
+
+    # EDGE: non-contiguous new_order values ------------------------
+    def test_non_contiguous_new_order_normalized(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        s = mk_stop(alice, tid, title="TEST_NORM_Gap").json()["stop_id"]
+        a = mk_att(alice, tid, s, name="A").json()
+        b = mk_att(alice, tid, s, name="B").json()
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": a["attraction_id"], "target_stop_id": s, "new_order": 0},
+            {"attraction_id": b["attraction_id"], "target_stop_id": s, "new_order": 5}]})
+        assert r.status_code == 200, r.text
+        api = self._api_orders(alice, tid, s)
+        assert api == [("A", 0), ("B", 1)], api
+        assert self._mongo_orders(mongo, tid, s) == [("A", 0), ("B", 1)]
+        alice.delete(f"{API}/trips/{tid}/stops/{s}")
+
+    # EDGE: untouched stops keep their numbering -------------------
+    def test_untouched_stop_not_renumbered(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        s1 = mk_stop(alice, tid, title="TEST_NORM_T1").json()["stop_id"]
+        s2 = mk_stop(alice, tid, title="TEST_NORM_T2").json()["stop_id"]
+        x = mk_att(alice, tid, s1, name="X").json()
+        y = mk_att(alice, tid, s1, name="Y").json()
+        # untouched stop deliberately holds sparse orders
+        p = mk_att(alice, tid, s2, name="P").json()
+        mongo.attractions.update_one({"attraction_id": p["attraction_id"]}, {"$set": {"order": 7}})
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": y["attraction_id"], "target_stop_id": s1, "new_order": 0},
+            {"attraction_id": x["attraction_id"], "target_stop_id": s1, "new_order": 1}]})
+        assert r.status_code == 200, r.text
+        assert self._api_orders(alice, tid, s1) == [("Y", 0), ("X", 1)]
+        # s2 untouched -> still sparse (proves no global renumbering)
+        assert self._mongo_orders(mongo, tid, s2) == [("P", 7)]
+        alice.delete(f"{API}/trips/{tid}/stops/{s1}")
+        alice.delete(f"{API}/trips/{tid}/stops/{s2}")
+
+    # Move that creates a duplicate order with a LATER-created item
+    def test_move_to_position_zero_before_older_item(self, alice, mongo, norm_trip):
+        """Target stop's existing item was created BEFORE the moved one; moved item
+        asks for new_order=0 and must land at 0 (created_at tie-break must not win)."""
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_TieA").json()["stop_id"]
+        b = mk_stop(alice, tid, title="TEST_NORM_TieB").json()["stop_id"]
+        old = mk_att(alice, tid, b, name="Older").json()      # created first
+        newer = mk_att(alice, tid, a, name="Newer").json()    # created later
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": newer["attraction_id"], "target_stop_id": b, "new_order": 0}]})
+        assert r.status_code == 200, r.text
+        api_b = self._api_orders(alice, tid, b)
+        self._assert_contiguous(api_b, "target stop")
+        assert api_b == [("Newer", 0), ("Older", 1)], f"moved item did not land at requested position: {api_b}"
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+        alice.delete(f"{API}/trips/{tid}/stops/{b}")
+
+    # EDGE (a): two moves A->B at positions 0 and 1 over older items X,Y
+    def test_two_moves_into_stop_with_older_items(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_TwoA").json()["stop_id"]
+        b = mk_stop(alice, tid, title="TEST_NORM_TwoB").json()["stop_id"]
+        x = mk_att(alice, tid, b, name="X").json()   # older, order 0
+        y = mk_att(alice, tid, b, name="Y").json()   # older, order 1
+        m0 = mk_att(alice, tid, a, name="M0").json()
+        m1 = mk_att(alice, tid, a, name="M1").json()
+        assert (x["order"], y["order"], m0["order"], m1["order"]) == (0, 1, 0, 1)
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": m0["attraction_id"], "target_stop_id": b, "new_order": 0},
+            {"attraction_id": m1["attraction_id"], "target_stop_id": b, "new_order": 1}]})
+        assert r.status_code == 200, r.text
+        api_b = self._api_orders(alice, tid, b)
+        self._assert_contiguous(api_b, "target stop")
+        assert api_b == [("M0", 0), ("M1", 1), ("X", 2), ("Y", 3)], api_b
+        assert self._mongo_orders(mongo, tid, b) == [("M0", 0), ("M1", 1), ("X", 2), ("Y", 3)]
+        assert self._api_orders(alice, tid, a) == []
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+        alice.delete(f"{API}/trips/{tid}/stops/{b}")
+
+    # EDGE (b): moved item lands at end (new_order == existing count)
+    def test_move_to_end_lands_last(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_EndA").json()["stop_id"]
+        b = mk_stop(alice, tid, title="TEST_NORM_EndB").json()["stop_id"]
+        x = mk_att(alice, tid, b, name="X").json()
+        y = mk_att(alice, tid, b, name="Y").json()
+        m = mk_att(alice, tid, a, name="M").json()
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": m["attraction_id"], "target_stop_id": b, "new_order": 2}]})
+        assert r.status_code == 200, r.text
+        api_b = self._api_orders(alice, tid, b)
+        self._assert_contiguous(api_b, "target stop")
+        assert api_b == [("X", 0), ("Y", 1), ("M", 2)], api_b
+        assert self._mongo_orders(mongo, tid, b) == [("X", 0), ("Y", 1), ("M", 2)]
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+        alice.delete(f"{API}/trips/{tid}/stops/{b}")
+
+
+    # EDGE (a): three inbound moves into stop holding 2 older items
+    def test_three_moves_into_stop_with_older_items(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_ThreeA").json()["stop_id"]
+        b = mk_stop(alice, tid, title="TEST_NORM_ThreeB").json()["stop_id"]
+        x = mk_att(alice, tid, b, name="X").json()
+        y = mk_att(alice, tid, b, name="Y").json()
+        m0 = mk_att(alice, tid, a, name="M0").json()
+        m1 = mk_att(alice, tid, a, name="M1").json()
+        m2 = mk_att(alice, tid, a, name="M2").json()
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": m2["attraction_id"], "target_stop_id": b, "new_order": 2},
+            {"attraction_id": m0["attraction_id"], "target_stop_id": b, "new_order": 0},
+            {"attraction_id": m1["attraction_id"], "target_stop_id": b, "new_order": 1}]})
+        assert r.status_code == 200, r.text
+        api_b = self._api_orders(alice, tid, b)
+        self._assert_contiguous(api_b, "target stop")
+        assert api_b == [("M0", 0), ("M1", 1), ("M2", 2), ("X", 3), ("Y", 4)], api_b
+        assert self._mongo_orders(mongo, tid, b) == [("M0", 0), ("M1", 1), ("M2", 2), ("X", 3), ("Y", 4)]
+        assert self._api_orders(alice, tid, a) == []
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+        alice.delete(f"{API}/trips/{tid}/stops/{b}")
+
+    # EDGE (b): new_order far beyond current length is bounded to end
+    def test_inbound_order_beyond_length_lands_at_end(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_BeyA").json()["stop_id"]
+        b = mk_stop(alice, tid, title="TEST_NORM_BeyB").json()["stop_id"]
+        mk_att(alice, tid, b, name="X")
+        mk_att(alice, tid, b, name="Y")
+        m = mk_att(alice, tid, a, name="M").json()
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": m["attraction_id"], "target_stop_id": b, "new_order": 99}]})
+        assert r.status_code == 200, r.text
+        api_b = self._api_orders(alice, tid, b)
+        self._assert_contiguous(api_b, "target stop")
+        assert api_b == [("X", 0), ("Y", 1), ("M", 2)], api_b
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+        alice.delete(f"{API}/trips/{tid}/stops/{b}")
+
+    # EDGE (d): same-stop reorder + cross-stop move in ONE request
+    def test_mixed_same_stop_and_cross_stop_moves(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_MixA").json()["stop_id"]
+        b = mk_stop(alice, tid, title="TEST_NORM_MixB").json()["stop_id"]
+        a1 = mk_att(alice, tid, a, name="A1").json()
+        a2 = mk_att(alice, tid, a, name="A2").json()
+        a3 = mk_att(alice, tid, a, name="A3").json()
+        b1 = mk_att(alice, tid, b, name="B1").json()
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            # same-stop reorder inside A: A3 -> front
+            {"attraction_id": a3["attraction_id"], "target_stop_id": a, "new_order": 0},
+            # cross-stop: A1 -> B at position 0
+            {"attraction_id": a1["attraction_id"], "target_stop_id": b, "new_order": 0}]})
+        assert r.status_code == 200, r.text
+        api_a = self._api_orders(alice, tid, a)
+        api_b = self._api_orders(alice, tid, b)
+        self._assert_contiguous(api_a, "stop A")
+        self._assert_contiguous(api_b, "stop B")
+        assert api_a == [("A3", 0), ("A2", 1)], api_a
+        assert api_b == [("A1", 0), ("B1", 1)], api_b
+        assert self._mongo_orders(mongo, tid, a) == [("A3", 0), ("A2", 1)]
+        assert self._mongo_orders(mongo, tid, b) == [("A1", 0), ("B1", 1)]
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+        alice.delete(f"{API}/trips/{tid}/stops/{b}")
+
+    # EDGE (e): depleted source stop stays contiguous 0..N-1
+    def test_depleted_source_stop_contiguous(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        a = mk_stop(alice, tid, title="TEST_NORM_DepA").json()["stop_id"]
+        b = mk_stop(alice, tid, title="TEST_NORM_DepB").json()["stop_id"]
+        s1 = mk_att(alice, tid, a, name="S1").json()
+        s2 = mk_att(alice, tid, a, name="S2").json()
+        s3 = mk_att(alice, tid, a, name="S3").json()
+        s4 = mk_att(alice, tid, a, name="S4").json()
+
+        r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": [
+            {"attraction_id": s1["attraction_id"], "target_stop_id": b, "new_order": 0},
+            {"attraction_id": s3["attraction_id"], "target_stop_id": b, "new_order": 1}]})
+        assert r.status_code == 200, r.text
+        api_a = self._api_orders(alice, tid, a)
+        api_b = self._api_orders(alice, tid, b)
+        self._assert_contiguous(api_a, "source stop")
+        self._assert_contiguous(api_b, "target stop")
+        assert api_a == [("S2", 0), ("S4", 1)], api_a
+        assert api_b == [("S1", 0), ("S3", 1)], api_b
+        alice.delete(f"{API}/trips/{tid}/stops/{a}")
+        alice.delete(f"{API}/trips/{tid}/stops/{b}")
+
+    # Mongo sanity: no duplicate (trip_id, stop_id, order) after heavy reordering
+    def test_no_duplicate_order_tuples_in_trip(self, alice, mongo, norm_trip):
+        tid = norm_trip["trip_id"]
+        s = mk_stop(alice, tid, title="TEST_NORM_Dup").json()["stop_id"]
+        atts = [mk_att(alice, tid, s, name=f"D{i}").json() for i in range(5)]
+        # rotate a few times
+        for shift in (1, 2, 3):
+            moves = [{"attraction_id": atts[i]["attraction_id"], "target_stop_id": s,
+                      "new_order": (i + shift) % 5} for i in range(5)]
+            r = alice.post(f"{API}/trips/{tid}/attractions/reorder", json={"moves": moves})
+            assert r.status_code == 200, r.text
+            pairs = self._api_orders(alice, tid, s)
+            self._assert_contiguous(pairs, f"rotate shift={shift}")
+
+        dupes = list(mongo.attractions.aggregate([
+            {"$match": {"trip_id": tid}},
+            {"$group": {"_id": {"stop_id": "$stop_id", "order": "$order"}, "n": {"$sum": 1}}},
+            {"$match": {"n": {"$gt": 1}}},
+        ]))
+        assert dupes == [], f"duplicate (stop_id, order) tuples: {dupes}"
+        alice.delete(f"{API}/trips/{tid}/stops/{s}")

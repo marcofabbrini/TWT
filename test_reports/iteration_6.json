@@ -1,0 +1,29 @@
+{
+  "summary": "TWT Phase 2 backend retest after the reorder_attractions refactor (Python-computed canonical layout + single bulk_write). Ran full regression: backend_test.py (Phase 1) + phase2_test.py (Phase 2) = 99 pre-existing tests, ALL PASS, including the previously failing test_two_moves_into_stop_with_older_items. Added 5 new edge tests to TestOrderNormalization (3-move batch, new_order beyond length, mixed same-stop+cross-stop batch, depleted source contiguity, rotation stress + Mongo duplicate-tuple aggregation) — all pass. Suite is now 104 tests, 104 passed. Mongo sanity scan shows no duplicate (trip_id, stop_id, order) produced by the current code path; the only remaining duplicate is the pre-existing legacy trip flagged in iteration_5.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "data (legacy)", "issue": "Legacy trip 'Test Phase 2' (trip_2c01e705da5d454c) still holds duplicate order 0 in stop_30efa137f9c04cfc and a non-contiguous order 1 in stop_86fcb614e2d4444d. Not reproducible with current code — leftover pre-fix data. Optional one-off renormalization migration."},
+      {"endpoint": "POST /api/trips/{trip_id}/attractions/reorder", "issue": "to_list(5000) / to_list(2000) caps are silent truncation risks for very large trips; also the final response returns ALL attractions of the trip sorted by order only (orders repeat across stops, so cross-stop ordering in the payload is arbitrary). Cosmetic/robustness only, no test failure."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/phase2_test.py", "/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml", "/app/test_reports/dup_order_check.py"],
+  "action_items": [
+    "No functional fixes required for reorder_attractions — the multi-move contiguity defect from iteration_5 is resolved.",
+    "Optional: one-time renormalization of the legacy trip_2c01e705da5d454c attraction orders.",
+    "Optional: replace to_list(N) caps with paging/explicit guard in reorder_attractions and _renormalize_stop_attractions."
+  ],
+  "critical_code_review_comments": [
+    "reorder_attractions now inserts inbound moves sorted by (new_order, attraction_id) into the stay-list and bounds insert_at to len(list) — semantics are correct and idempotent; verified against 3-move batches, out-of-range positions, and mixed same/cross-stop batches.",
+    "_renormalize_stop_attractions is now only used by delete paths; its moved_ids tie-break parameter is dead code from reorder (always empty) — consider simplifying to avoid confusion."
+  ],
+  "updated_files": ["/app/backend/tests/phase2_test.py"],
+  "success_rate": {"backend": "100% (104/104)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Tests create/delete their own TEST_* trips/stops/attractions via dev-login alice@twt.app; all cleaned up by fixtures.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "dev-login alice@twt.app / bob@twt.app (ENV=dev)",
+  "context_for_next_testing_agent": "Suite = 104 tests (backend_test.py 23 + phase2_test.py 81). TestOrderNormalization now has 15 tests. Run: cd /app/backend && python -m pytest tests/backend_test.py tests/phase2_test.py -q. Mongo sanity: python /app/test_reports/dup_order_check.py (only legacy trip_2c01e705da5d454c is dirty).",
+  "rca_of_the_issue": "iteration_5 defect RCA: the write-raw-then-normalize approach ranked each moved item only against the item sharing its exact order value, so existing items interleaved a multi-item moved block. The refactor computes the final list per touched stop in Python (stay items sorted by (order, created_at), then inbound moves list-inserted at their requested index) and writes canonical 0..N-1 orders in one bulk_write. Verified fixed for 2- and 3-item batches and for mixed batches."
+}
