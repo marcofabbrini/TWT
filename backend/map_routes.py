@@ -136,6 +136,7 @@ async def route_geometry(trip_id: str, current_user: dict = Depends(require_auth
     """Return stops (with cached coords) + per-segment route geometry."""
     await require_role(trip_id, current_user["user_id"], "viewer")
 
+    trip = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
     stops = await db.stops.find(
         {"trip_id": trip_id},
         {"_id": 0},
@@ -227,4 +228,52 @@ async def route_geometry(trip_id: str, current_user: dict = Depends(require_auth
             "duration_s": res.get("duration_s"),
         })
 
-    return {"stops": stops_out, "routes": routes_out}
+    return {"stops": stops_out, "routes": routes_out, "return_leg": await _build_return_leg(trip, stops, coords_list)}
+
+
+async def _build_return_leg(
+    trip: Optional[dict],
+    stops: List[dict],
+    coords_list: List[Optional[Tuple[float, float]]],
+) -> Optional[dict]:
+    """Compute the closing leg from the last stop back to trip.home_location.
+    Returns None unless has_return=true AND home_location is set AND ≥1 stop.
+    """
+    if not trip:
+        return None
+    if not trip.get("has_return"):
+        return None
+    home_location = (trip.get("home_location") or "").strip()
+    if not home_location:
+        return None
+    if not stops:
+        return None
+
+    last_stop = stops[-1]
+    last_coords = coords_list[-1]
+    home_coords = await geocode(home_location)
+    mode = "car"
+
+    leg = {
+        "home_location": home_location,
+        "home_coords": [home_coords[0], home_coords[1]] if home_coords else None,
+        "from_stop_id": last_stop["stop_id"],
+        "transport_mode": mode,
+        "geojson": None,
+        "distance_m": None,
+        "duration_s": None,
+    }
+
+    if not last_coords or not home_coords:
+        return leg
+
+    res = await _get_or_fetch_route(last_coords, home_coords, mode)
+    if res is None:
+        # graceful: no geometry, but we can still compute haversine for distance
+        leg["distance_m"] = haversine_km(last_coords, home_coords) * 1000.0
+        return leg
+
+    leg["geojson"] = res.get("geojson")
+    leg["distance_m"] = res.get("distance_m")
+    leg["duration_s"] = res.get("duration_s")
+    return leg

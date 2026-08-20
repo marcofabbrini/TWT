@@ -16,7 +16,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../ui/collapsible";
-import { Map as MapIcon, ChevronDown, MapPin, Loader2 } from "lucide-react";
+import { Map as MapIcon, ChevronDown, MapPin, Loader2, Home } from "lucide-react";
 import { api } from "@/lib/api";
 
 // ── Palette ────────────────────────────────────────────
@@ -26,6 +26,7 @@ const MODE_COLOR = {
   train: "#8B5CF6",
   plane: "#EC4899",
   other: "#94A3B8",
+  return: "#5EEAD4",
 };
 
 const MODE_LABEL = {
@@ -34,6 +35,7 @@ const MODE_LABEL = {
   train: "Train",
   plane: "Plane",
   other: "Other",
+  return: "Back home",
 };
 
 function colorFor(mode) {
@@ -89,6 +91,25 @@ function buildMarkerIcon(order) {
   const html = `
     <div class="twt-map-pin" role="button" aria-label="Stop ${order + 1}">
       <span class="twt-map-pin__num">${order + 1}</span>
+    </div>`;
+  return L.divIcon({
+    className: "twt-map-pin-wrap",
+    html,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+    popupAnchor: [0, -12],
+  });
+}
+
+/** Build a Leaflet DivIcon for the "home" marker (dashed teal ring). */
+function buildHomeIcon() {
+  const html = `
+    <div class="twt-map-home" role="button" aria-label="Home">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        stroke-linejoin="round" width="14" height="14">
+        <path d="M3 9.5 12 3l9 6.5V21a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1z"/>
+      </svg>
     </div>`;
   return L.divIcon({
     className: "twt-map-pin-wrap",
@@ -166,16 +187,24 @@ export default function TripMap({ tripId, syncVersion }) {
     return m;
   }, [data]);
 
-  const points = useMemo(
-    () => stopsWithCoords.map((s) => [s.coords[1], s.coords[0]]),
-    [stopsWithCoords]
-  );
+  const returnLeg = data?.return_leg || null;
+  const returnHomeCoords = returnLeg?.home_coords || null;
+  const lastStop = returnLeg
+    ? stopsById.get(returnLeg.from_stop_id) || null
+    : null;
+
+  const points = useMemo(() => {
+    const pts = stopsWithCoords.map((s) => [s.coords[1], s.coords[0]]);
+    if (returnHomeCoords) pts.push([returnHomeCoords[1], returnHomeCoords[0]]);
+    return pts;
+  }, [stopsWithCoords, returnHomeCoords]);
 
   const modesInUse = useMemo(() => {
     const set = new Set();
     (data?.routes || []).forEach((r) => set.add(r.transport_mode));
+    if (returnLeg && lastStop?.coords && returnHomeCoords) set.add("return");
     return Array.from(set);
-  }, [data]);
+  }, [data, returnLeg, lastStop, returnHomeCoords]);
 
   return (
     <div className="mb-8" data-testid="trip-map-wrapper">
@@ -394,6 +423,82 @@ export default function TripMap({ tripId, syncVersion }) {
                               />
                             );
                           })}
+
+                          {returnLeg && returnHomeCoords && (
+                            <Marker
+                              position={[returnHomeCoords[1], returnHomeCoords[0]]}
+                              icon={buildHomeIcon()}
+                            >
+                              <Popup>
+                                <div
+                                  className="twt-map-popup"
+                                  data-testid="trip-map-home-popup"
+                                >
+                                  <div className="twt-map-popup__title">
+                                    ↩ Home
+                                  </div>
+                                  <div className="twt-map-popup__meta">
+                                    {returnLeg.home_location}
+                                  </div>
+                                </div>
+                              </Popup>
+                            </Marker>
+                          )}
+
+                          {returnLeg && lastStop?.coords && returnHomeCoords && (() => {
+                            const color = MODE_COLOR.return;
+                            const onReturnClick = (e) => {
+                              if (e?.originalEvent) {
+                                e.originalEvent.stopPropagation?.();
+                              }
+                              setRoutePopup({
+                                latlng: e.latlng,
+                                route: {
+                                  from_stop_id: lastStop.stop_id,
+                                  to_stop_id: "__home__",
+                                  transport_mode: "return",
+                                  distance_m: returnLeg.distance_m,
+                                  duration_s: returnLeg.duration_s,
+                                  __return: true,
+                                  __home_location: returnLeg.home_location,
+                                },
+                                from: lastStop,
+                                to: { title: returnLeg.home_location },
+                              });
+                            };
+
+                            if (returnLeg.geojson) {
+                              return (
+                                <GeoJSON
+                                  key="return-leg"
+                                  data={returnLeg.geojson}
+                                  style={{
+                                    color,
+                                    weight: 4,
+                                    opacity: 0.8,
+                                    dashArray: "8, 4",
+                                  }}
+                                  eventHandlers={{ click: onReturnClick }}
+                                />
+                              );
+                            }
+                            return (
+                              <Polyline
+                                key="return-leg"
+                                positions={[
+                                  [lastStop.coords[1], lastStop.coords[0]],
+                                  [returnHomeCoords[1], returnHomeCoords[0]],
+                                ]}
+                                pathOptions={{
+                                  color,
+                                  weight: 3,
+                                  opacity: 0.75,
+                                  dashArray: "6, 6",
+                                }}
+                                eventHandlers={{ click: onReturnClick }}
+                              />
+                            );
+                          })()}
 
                           {routePopup && (
                             <Popup

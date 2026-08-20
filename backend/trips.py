@@ -41,6 +41,7 @@ async def _get_membership(trip_id: str, user_id: str) -> Optional[dict]:
 @router.post("", response_model=Trip, status_code=status.HTTP_201_CREATED)
 async def create_trip(body: TripCreate, current_user: dict = Depends(require_auth)):
     trip_id = new_id("trip_")
+    home_location = (body.home_location or "").strip() or None
     trip_doc = {
         "trip_id": trip_id,
         "owner_id": current_user["user_id"],
@@ -49,6 +50,8 @@ async def create_trip(body: TripCreate, current_user: dict = Depends(require_aut
         "start_date": body.start_date.isoformat(),
         "end_date": body.end_date.isoformat(),
         "cover_image_url": body.cover_image_url,
+        "home_location": home_location,
+        "has_return": bool(body.has_return),
         "created_at": utcnow().isoformat(),
         "updated_at": utcnow().isoformat(),
         "version": 0,
@@ -200,6 +203,21 @@ async def update_trip(
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         return Trip(**_serialize_trip(trip))
+
+    # ── home_location / has_return coherence ─────────────────────────
+    if "home_location" in updates:
+        hl = updates["home_location"]
+        updates["home_location"] = (hl or "").strip() or None
+    # effective values after this patch
+    eff_has_return = updates.get("has_return") if "has_return" in updates else trip.get("has_return", False)
+    eff_home_location = (
+        updates["home_location"] if "home_location" in updates else trip.get("home_location")
+    )
+    if eff_has_return and not eff_home_location:
+        raise HTTPException(
+            status_code=422,
+            detail="home_location is required when has_return=true",
+        )
 
     # Effective start/end for validation.
     from datetime import date as _date

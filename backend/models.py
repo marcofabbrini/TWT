@@ -56,6 +56,8 @@ class TripCreate(BaseModel):
     start_date: date
     end_date: date
     cover_image_url: Optional[str] = None
+    home_location: Optional[str] = Field(default=None, max_length=200)
+    has_return: bool = False
 
     @field_validator("home_currency")
     @classmethod
@@ -73,12 +75,21 @@ class TripCreate(BaseModel):
             raise ValueError("end_date must be greater than or equal to start_date")
         return v
 
+    @field_validator("has_return")
+    @classmethod
+    def _return_needs_home(cls, v, info):
+        if v and not (info.data.get("home_location") or "").strip():
+            raise ValueError("home_location is required when has_return=true")
+        return v
+
 
 class TripUpdate(BaseModel):
     title: Optional[str] = Field(default=None, min_length=1, max_length=120)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     cover_image_url: Optional[str] = None
+    home_location: Optional[str] = Field(default=None, max_length=200)
+    has_return: Optional[bool] = None
 
 
 class Trip(BaseModel):
@@ -90,6 +101,8 @@ class Trip(BaseModel):
     start_date: date
     end_date: date
     cover_image_url: Optional[str] = None
+    home_location: Optional[str] = None
+    has_return: bool = False
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -357,6 +370,7 @@ class ExpenseBase(BaseModel):
     cost: float = Field(ge=0)
     currency: Optional[str] = None
     stop_id: Optional[str] = None
+    expense_date: Optional[date] = None
     split_between: List[str] = Field(default_factory=list)
     paid_by: Optional[str] = None
     notes: Optional[str] = Field(default=None, max_length=2000)
@@ -376,6 +390,7 @@ class ExpenseUpdate(BaseModel):
     cost: Optional[float] = Field(default=None, ge=0)
     currency: Optional[str] = None
     stop_id: Optional[str] = None
+    expense_date: Optional[date] = None
     split_between: Optional[List[str]] = None
     paid_by: Optional[str] = None
     notes: Optional[str] = Field(default=None, max_length=2000)
@@ -392,6 +407,7 @@ class Expense(ExpenseBase):
     trip_id: str
     currency: str  # concrete after create
     paid_by: str
+    expense_date: date  # concrete after create
     split_between: List[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

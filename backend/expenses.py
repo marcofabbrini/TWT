@@ -1,6 +1,6 @@
 """Expenses routes (Phase 3)."""
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,6 +13,37 @@ from versioning import bump_version
 
 logger = logging.getLogger("twt.expenses")
 router = APIRouter(prefix="/trips/{trip_id}/expenses", tags=["expenses"])
+
+
+def _to_date(v):
+    if isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        return date.fromisoformat(v[:10])
+    return None
+
+
+def _default_expense_date(trip: dict) -> date:
+    """today if within trip range, else trip.start_date."""
+    ts = _to_date(trip["start_date"])
+    te = _to_date(trip["end_date"])
+    today = date.today()
+    if ts <= today <= te:
+        return today
+    return ts
+
+
+def _validate_expense_date(trip: dict, d: date) -> None:
+    ts = _to_date(trip["start_date"])
+    te = _to_date(trip["end_date"])
+    if d < ts or d > te:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Expense date must be within trip range "
+                f"({ts.isoformat()} → {te.isoformat()})"
+            ),
+        )
 
 
 async def _validate_split(trip_id: str, user_ids: list) -> None:
@@ -39,6 +70,11 @@ def _serialize(doc: dict) -> dict:
         v = out.get(k)
         if isinstance(v, str):
             out[k] = datetime.fromisoformat(v)
+    v = out.get("expense_date")
+    if isinstance(v, str):
+        out["expense_date"] = date.fromisoformat(v[:10])
+    elif isinstance(v, datetime):
+        out["expense_date"] = v.date()
     return out
 
 
@@ -60,7 +96,11 @@ async def list_expenses(
     q = {"trip_id": trip_id}
     if stop_id is not None:
         q["stop_id"] = stop_id
-    docs = await db.expenses.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    docs = (
+        await db.expenses.find(q, {"_id": 0})
+        .sort([("expense_date", -1), ("created_at", -1)])
+        .to_list(2000)
+    )
     return [Expense(**_serialize(d)) for d in docs]
 
 
@@ -79,6 +119,9 @@ async def create_expense(
     currency = body.currency or trip["home_currency"]
     await _validate_split(trip_id, split_between + [paid_by])
 
+    exp_date = body.expense_date or _default_expense_date(trip)
+    _validate_expense_date(trip, exp_date)
+
     doc = {
         "expense_id": new_id("exp_"),
         "trip_id": trip_id,
@@ -88,6 +131,7 @@ async def create_expense(
         "currency": currency,
         "paid_by": paid_by,
         "split_between": split_between,
+        "expense_date": exp_date.isoformat(),
         "notes": body.notes,
         "created_at": utcnow().isoformat(),
         "updated_at": utcnow().isoformat(),
@@ -117,6 +161,16 @@ async def update_expense(
         new_split = updates.get("split_between", existing.get("split_between") or [])
         new_paid_by = updates.get("paid_by", existing.get("paid_by"))
         await _validate_split(trip_id, list(new_split) + ([new_paid_by] if new_paid_by else []))
+    if "expense_date" in updates:
+        trip = await get_trip_or_404(trip_id)
+        new_date = updates["expense_date"]
+        if new_date is None:
+            raise HTTPException(status_code=422, detail="expense_date cannot be null")
+        if isinstance(new_date, date):
+            _validate_expense_date(trip, new_date)
+            updates["expense_date"] = new_date.isoformat()
+        elif isinstance(new_date, str):
+            _validate_expense_date(trip, date.fromisoformat(new_date[:10]))
     updates["updated_at"] = utcnow().isoformat()
     await db.expenses.update_one({"expense_id": expense_id}, {"$set": updates})
     await bump_version(trip_id, current_user["user_id"])

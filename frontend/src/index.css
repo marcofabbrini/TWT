@@ -150,6 +150,24 @@
 .twt-map-pin:hover {
   transform: scale(1.08);
 }
+.twt-map-home {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(15, 17, 22, 0.92);
+  border: 2px dashed #5eead4;
+  color: #5eead4;
+  display: grid;
+  place-items: center;
+  box-shadow:
+    0 0 0 3px rgba(94, 234, 212, 0.12),
+    0 6px 16px -4px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  transition: transform 200ms ease;
+}
+.twt-map-home:hover {
+  transform: scale(1.08);
+}
 .leaflet-container {
   background: #0f1116;
   font-family: "Sniglet", ui-rounded, sans-serif;

@@ -147,3 +147,12 @@ Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) 
   - Auto fit-bounds on data change.
   - Legal OSM attribution kept visible (styled dark).
 - **Bundle**: leaflet + react-leaflet added to package.json; lazy-loaded so it does not enter the Dashboard bundle.
+
+## Sprint A+B (Feb 2026)
+### Block A — Trip.home_location + Trip.has_return
+- **Backend**: models add `home_location: Optional[str]` + `has_return: bool`; POST/PATCH validate has_return↔home_location coherence (422 if inconsistent). Endpoint `GET /api/trips/{id}/route-geometry` returns new field `return_leg` (home_location, home_coords, from_stop_id=last, transport_mode='car', geojson, distance_m, duration_s). Graceful haversine fallback when ORS unreachable.
+- **Frontend**: CreateTripModal + EditTripModal collapsible "Return home" (glass) with location input + Radix Switch; submit disabled when has_return && !home_location. StopCard renders position badge (Start / Stop N / Destination / Start & Destination). Trip sub-header shows "↩ Back home" chip when has_return && home_location. TripMap adds custom home divIcon (dashed teal ring + house svg), return polyline (car geojson or dashed fallback, pink→teal palette-coherent) + "Back home" legend chip + home popup.
+### Block B — Expense.expense_date
+- **Backend**: Expense adds mandatory `expense_date: date`. POST defaults to today (or trip.start_date if today out of range); PATCH validates range 422. List sorted by expense_date DESC, created_at DESC. Backfill script `scripts/backfill_expense_date.py` (26 legacy expenses updated, rerun 0 = idempotent). PATCH explicitly rejects `expense_date=null` (422).
+- **Frontend**: ExpenseModal adds date input with min/max=trip range, default = clamp(today, trip range). Form has `noValidate` so app-level range error `Date must be within trip range (X → Y)` renders even when native constraint validation would block. ExpensesSection sorts client-side by expense_date desc + shows date cell with icon.
+- **Testing**: 19/19 new backend tests + regression on 14+ prior suites. Frontend Playwright verified all UI flows; 3 defects flagged by tester and fixed same-iteration: EditTripModal sync-reset guard (only reset on open transition or trip.trip_id change), ExpenseModal noValidate, PATCH null rejection.

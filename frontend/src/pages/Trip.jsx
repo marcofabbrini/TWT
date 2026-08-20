@@ -347,9 +347,20 @@ export default function Trip() {
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div className="flex-1 min-w-0">
-            <h1 className="text-display text-2xl leading-none truncate" data-testid="trip-title">
-              {trip.title}
-            </h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-display text-2xl leading-none truncate" data-testid="trip-title">
+                {trip.title}
+              </h1>
+              {trip.has_return && trip.home_location && (
+                <span
+                  className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest px-2 py-1 rounded-full glass border border-twt-teal/25 text-twt-teal"
+                  data-testid="trip-back-home-chip"
+                  title={`Return home to ${trip.home_location}`}
+                >
+                  ↩ Back home
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-3 text-xs text-twt-muted mt-1">
               <span className="inline-flex items-center gap-1.5">
                 <CalendarDays className="w-3 h-3" /> {fmtLongDate(trip.start_date)} →{" "}
@@ -427,6 +438,7 @@ export default function Trip() {
                     <StopCard
                       stop={s}
                       index={idx}
+                      totalStops={stops.length}
                       attractions={attractionsByStop[s.stop_id] || []}
                       hotels={hotelsByStop[s.stop_id] || []}
                       canEdit={editable}

@@ -24,11 +24,27 @@ import { toast } from "sonner";
 
 const CURRENCIES = ["EUR", "USD", "GBP", "CHF", "JPY"];
 
+function todayIso() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function clampToTripRange(iso, trip) {
+  if (!trip?.start_date || !trip?.end_date) return iso;
+  if (iso < trip.start_date) return trip.start_date;
+  if (iso > trip.end_date) return trip.start_date;
+  return iso;
+}
+
 const empty = {
   label: "",
   cost: "",
   currency: "EUR",
   stop_id: "__none__",
+  expense_date: "",
   notes: "",
   split_between: [],
 };
@@ -63,6 +79,7 @@ export default function ExpenseModal({
             : String(editingExpense.cost),
         currency: editingExpense.currency || trip?.home_currency || "EUR",
         stop_id: editingExpense.stop_id || "__none__",
+        expense_date: editingExpense.expense_date || "",
         notes: editingExpense.notes || "",
         split_between: editingExpense.split_between || [],
       });
@@ -70,11 +87,15 @@ export default function ExpenseModal({
       setForm({
         ...empty,
         currency: trip?.home_currency || "EUR",
+        expense_date: clampToTripRange(todayIso(), trip),
         split_between: acceptedMembers.map((m) => m.user.user_id),
       });
     }
     setError("");
-  }, [open, editingExpense, trip, acceptedMembers]);
+    // Reset only when dialog transitions open OR the edit target changes.
+    // Do NOT reset on background trip/members polling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editingExpense?.expense_id]);
 
   const update = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -84,12 +105,20 @@ export default function ExpenseModal({
     if (!form.label.trim()) return setError("Label is required.");
     if (form.cost === "" || Number(form.cost) < 0)
       return setError("Cost must be a non-negative number.");
+    if (form.expense_date && trip?.start_date && trip?.end_date) {
+      if (form.expense_date < trip.start_date || form.expense_date > trip.end_date) {
+        return setError(
+          `Date must be within trip range (${trip.start_date} → ${trip.end_date}).`
+        );
+      }
+    }
 
     const payload = {
       label: form.label.trim(),
       cost: Number(form.cost),
       currency: form.currency,
       stop_id: form.stop_id === "__none__" ? null : form.stop_id,
+      expense_date: form.expense_date || undefined,
       split_between: form.split_between,
       notes: form.notes || null,
     };
@@ -139,7 +168,7 @@ export default function ExpenseModal({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4 mt-2">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4 mt-2">
           <div className="space-y-1.5">
             <Label className="text-twt-muted text-xs uppercase tracking-widest">Label</Label>
             <Input
@@ -149,6 +178,23 @@ export default function ExpenseModal({
               className="bg-white/[0.03] border-white/10 focus-visible:ring-twt-teal/40"
               data-testid="expense-label-input"
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-twt-muted text-xs uppercase tracking-widest">Date</Label>
+            <Input
+              type="date"
+              value={form.expense_date}
+              min={trip?.start_date}
+              max={trip?.end_date}
+              onChange={(e) => update("expense_date", e.target.value)}
+              className="bg-white/[0.03] border-white/10 focus-visible:ring-twt-teal/40 [color-scheme:dark]"
+              data-testid="expense-date-input"
+            />
+            {trip?.start_date && trip?.end_date && (
+              <div className="text-[11px] text-twt-muted">
+                Within {trip.start_date} → {trip.end_date}
+              </div>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-1.5 col-span-2">

@@ -1,0 +1,29 @@
+{
+  "email": "sprint_ui@twt.app",
+  "session_token": "dev_c7ea76f26d924bdd",
+  "trip_id": "trip_b0fd06b42e004648",
+  "start_date": "2026-08-19",
+  "end_date": "2026-08-26",
+  "stop_ids": [
+    "stop_8c9471cfe3474f3b",
+    "stop_d86b2db32df646a9",
+    "stop_05a3f082d4344171"
+  ],
+  "expenses": [
+    [
+      "exp_da1eea7ccd40475c",
+      "2026-08-23"
+    ],
+    [
+      "exp_befe2ce995194b90",
+      "2026-08-20"
+    ],
+    [
+      "exp_3478e8732bfc47e3",
+      "2026-08-25"
+    ]
+  ],
+  "trip2_id": "trip_2e4b1a62f49340b4",
+  "trip2_start": "2026-09-19",
+  "trip2_end": "2026-09-24"
+}

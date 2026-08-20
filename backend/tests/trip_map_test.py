@@ -93,7 +93,9 @@ class TestRouteGeometryAuth:
         r = owner.get(f"{API}/trips/{tid}/route-geometry")
         assert r.status_code == 200
         body = r.json()
-        assert set(body.keys()) == {"stops", "routes"}
+        # Sprint A+B added return_leg to the payload.
+        assert {"stops", "routes"}.issubset(set(body.keys()))
+        assert body.get("return_leg") is None
 
     def test_200_for_editor_and_viewer(self, owner, created_trip_ids):
         tid = _mk_trip(owner, "TEST_MAP_roles", created_trip_ids)

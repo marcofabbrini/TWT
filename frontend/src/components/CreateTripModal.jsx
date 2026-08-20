@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Dialog,
   DialogContent,
@@ -18,8 +18,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, Home, ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
 
 const CURRENCIES = [
@@ -36,8 +37,13 @@ export default function CreateTripModal({ open, onOpenChange, onCreated }) {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [coverUrl, setCoverUrl] = useState("");
+  const [homeLocation, setHomeLocation] = useState("");
+  const [hasReturn, setHasReturn] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  const returnInvalid = hasReturn && !homeLocation.trim();
 
   const reset = () => {
     setTitle("");
@@ -45,6 +51,9 @@ export default function CreateTripModal({ open, onOpenChange, onCreated }) {
     setStartDate("");
     setEndDate("");
     setCoverUrl("");
+    setHomeLocation("");
+    setHasReturn(false);
+    setReturnOpen(false);
     setError("");
   };
 
@@ -56,6 +65,9 @@ export default function CreateTripModal({ open, onOpenChange, onCreated }) {
     if (new Date(endDate) < new Date(startDate)) {
       return setError("End date must be on or after start date.");
     }
+    if (returnInvalid) {
+      return setError("Home location is required to enable return trip.");
+    }
     try {
       setSubmitting(true);
       const { data } = await api.post("/trips", {
@@ -64,6 +76,8 @@ export default function CreateTripModal({ open, onOpenChange, onCreated }) {
         start_date: startDate,
         end_date: endDate,
         cover_image_url: coverUrl.trim() || null,
+        home_location: homeLocation.trim() || null,
+        has_return: hasReturn,
       });
       toast.success("Trip created", { description: data.title });
       reset();
@@ -87,7 +101,7 @@ export default function CreateTripModal({ open, onOpenChange, onCreated }) {
       }}
     >
       <DialogContent
-        className="glass-strong border-white/10 sm:max-w-lg text-twt-text"
+        className="glass-strong border-white/10 sm:max-w-lg text-twt-text max-h-[90vh] overflow-y-auto"
         data-testid="create-trip-modal"
       >
         <DialogHeader>
@@ -180,6 +194,92 @@ export default function CreateTripModal({ open, onOpenChange, onCreated }) {
             />
           </div>
 
+          {/* Return home — collapsible */}
+          <div className="rounded-xl border border-white/[0.08]">
+            <button
+              type="button"
+              onClick={() => setReturnOpen((o) => !o)}
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition"
+              data-testid="new-trip-return-toggle"
+              aria-expanded={returnOpen}
+            >
+              <div className="w-7 h-7 rounded-lg bg-twt-teal/12 grid place-items-center text-twt-teal">
+                <Home className="w-3.5 h-3.5" />
+              </div>
+              <div className="flex-1 text-left">
+                <div className="text-sm text-twt-text">Return home</div>
+                <div className="text-[11px] text-twt-muted">
+                  {hasReturn && homeLocation ? homeLocation : "Optional loop back to base"}
+                </div>
+              </div>
+              <motion.div
+                animate={{ rotate: returnOpen ? 180 : 0 }}
+                transition={{ duration: 0.2 }}
+                className="text-twt-muted"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </motion.div>
+            </button>
+            <AnimatePresence initial={false}>
+              {returnOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                  style={{ overflow: "hidden" }}
+                >
+                  <div className="px-4 pb-4 space-y-3 border-t border-white/[0.06] pt-3">
+                    <div className="space-y-1.5">
+                      <Label
+                        htmlFor="home_location"
+                        className="text-twt-muted text-xs uppercase tracking-widest"
+                      >
+                        Home location
+                      </Label>
+                      <Input
+                        id="home_location"
+                        value={homeLocation}
+                        onChange={(e) => setHomeLocation(e.target.value)}
+                        placeholder="e.g. Roma, Italia"
+                        maxLength={200}
+                        className="bg-white/[0.03] border-white/10 focus-visible:ring-twt-teal/40"
+                        data-testid="new-trip-home-location-input"
+                      />
+                    </div>
+                    <label
+                      className="flex items-center justify-between gap-3 py-1 cursor-pointer select-none"
+                      data-testid="new-trip-has-return-row"
+                    >
+                      <div>
+                        <div className="text-sm text-twt-text">
+                          Return to home at trip end
+                        </div>
+                        <div className="text-[11px] text-twt-muted">
+                          Draws a closing leg on the map back to your home.
+                        </div>
+                      </div>
+                      <Switch
+                        checked={hasReturn}
+                        onCheckedChange={setHasReturn}
+                        className="data-[state=checked]:bg-twt-teal"
+                        data-testid="new-trip-has-return-switch"
+                      />
+                    </label>
+                    {returnInvalid && (
+                      <div
+                        className="text-[11px] text-twt-rose"
+                        data-testid="new-trip-return-inline-error"
+                      >
+                        Home location required to enable return.
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           {error && (
             <motion.div
               initial={{ opacity: 0, y: -4 }}
@@ -203,8 +303,8 @@ export default function CreateTripModal({ open, onOpenChange, onCreated }) {
             </Button>
             <Button
               type="submit"
-              disabled={submitting}
-              className="bg-twt-teal text-black hover:bg-twt-teal-strong font-medium"
+              disabled={submitting || returnInvalid}
+              className="bg-twt-teal text-black hover:bg-twt-teal-strong font-medium disabled:opacity-50"
               data-testid="new-trip-submit-btn"
             >
               {submitting ? (

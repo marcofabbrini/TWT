@@ -1,0 +1,51 @@
+{
+  "summary": "Sprint A+B (Trip.home_location/has_return + Expense.expense_date) tested end-to-end. Backend: new pytest suite /app/backend/tests/sprint_ab_test.py — 19/19 passing (create/patch validation, RBAC 403, list fields, route-geometry return_leg incl. null cases, expense_date default/validation/sort, regression on stops/attractions/hotels/expenses/members/exchange-rates/notifications/route-geometry/openapi). Backfill script verified (2 seeded legacy expenses populated from stop.start_date / trip.start_date, re-run = 0 updates). ORS-unreachable fallback verified with ORS_MOCK=1 (geojson=null, distance_m=1912900 haversine) and ORS_MOCK restored to 0. Frontend Playwright: CreateTripModal return collapsible + inline error + disabled submit + trip creation, EditTripModal prepopulate/validate/save, StopCard badges (Start / Stop 1 / Destination and single-stop 'Start & Destination'), Trip '↩ BACK HOME' chip (with tooltip 'Return home to Roma, Italy') and hidden when has_return=false, TripMap home divIcon + 'Back home' legend chip + home popup (Roma, Italy) + 7 interactive paths, ExpenseModal date input min/max/default=trip.start_date, ExpensesSection date-desc ordering with date cells. Two frontend defects found (see below).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "db.expenses", "issue": "5 pre-existing orphan expense docs reference deleted trips (from earlier iterations). trips DELETE cascade code is correct; only legacy rows affected. Backfill logs a WARNING and skips them each run."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "EditTripModal", "issue": "In-progress edits are wiped by background sync: useEffect([open, trip]) re-runs whenever Trip.jsx's useTripSync/loadAll produces a new trip object (any version bump, e.g. another member adds an expense). Reproduced: typed title 'SPRINTAB_UI Future solo EDITED' and home 'Sintra' reverted to server values within ~12s, and the 'Return home' section collapsed mid-edit. Fix: reset form only when `open` transitions false→true (or key on trip.trip_id).", "selector": "[data-testid=\"edit-trip-modal\"]", "priority": "MEDIUM"},
+      {"component": "ExpenseModal", "issue": "Out-of-range date submit never shows the inline error. The native date input carries min/max, so Chrome's constraint validation blocks form submission (validationMessage: 'Value must be 09/24/2026 or earlier.') and the React check that sets 'Date must be within trip range (…)' in [data-testid=expense-modal-error] is unreachable. Add noValidate to the form (or validate on change) so the app-level message renders.", "selector": "[data-testid=\"expense-date-input\"] / [data-testid=\"expense-modal-error\"]", "priority": "MEDIUM"},
+      {"component": "TripMap", "issue": "data-testid=\"trip-map-container\" is never present in the DOM — react-leaflet MapContainer does not forward unknown props. Verified via .leaflet-container instead. Testability gap only.", "selector": "[data-testid=\"trip-map-container\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "CreateTripModal / EditTripModal / ExpenseModal", "issues": ["Native browser date pickers used instead of the shadcn calendar component (pre-existing pattern across the app, consistent but off-design)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/sprint_ab_test.py",
+    "/app/test_reports/pytest/sprint_ab_results.xml",
+    "/app/test_reports/seed_ui_sprintab.py",
+    "/app/test_reports/seed_backfill_sprintab.py",
+    "/app/test_reports/ors_fallback_check.py"
+  ],
+  "action_items": [
+    "EditTripModal: stop resetting form state on background trip refetch (guard the useEffect on open transition / trip_id) — currently loses user input.",
+    "ExpenseModal: make the inline out-of-range date error reachable (form noValidate or onChange validation) so [data-testid=expense-modal-error] shows 'Date must be within trip range …'.",
+    "TripMap: attach trip-map-container testid to a real DOM wrapper (MapContainer prop is dropped by react-leaflet)."
+  ],
+  "critical_code_review_comments": [
+    "expenses.py PATCH: ExpenseUpdate.expense_date is Optional, so an explicit {\"expense_date\": null} passes validation and writes null, violating the 'mandatory expense_date' contract (Expense model would then 500 on serialize). Reject null explicitly.",
+    "map_routes.py::route_geometry — trip may be None (deleted trip after permission check) and is only guarded inside _build_return_leg; fine today but consider an explicit 404.",
+    "trip_map_test.py had a strict key-set assertion on route-geometry; updated to allow the new return_leg field (test-only change)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/sprint_ab_test.py",
+    "/app/backend/tests/trip_map_test.py",
+    "/app/test_reports/seed_ui_sprintab.py",
+    "/app/test_reports/seed_backfill_sprintab.py",
+    "/app/test_reports/ors_fallback_check.py"
+  ],
+  "success_rate": {"backend": "100% (19/19 new + 14/14 trip_map + trip_summary/phase5_hotfix_v4 green)", "frontend": "88% (15/17 checks passed; 2 defects)"},
+  "seed_data_creation": "sprint_ui@twt.app: trip 'SPRINTAB_UI Roma loop' (trip_b0fd06b42e004648, has_return + Roma home, 3 stops, 3 dated expenses), 'SPRINTAB_UI Future solo' (trip_2e4b1a62f49340b4, future range, 1 stop, has_return enabled via UI to Napoli), 'SPRINTAB_UI Created' (created through CreateTripModal). sprint_ab@twt.app test trips are auto-cleaned by the pytest fixture.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "POST /api/auth/dev-login {email} (ENV=dev) — sprint_ab@twt.app (backend), sprint_ui@twt.app (UI seeds); /api/auth/dev-login-as used for editor-role 403 test.",
+  "context_for_next_testing_agent": "Backend suite: `cd /app/backend && python -m pytest tests/sprint_ab_test.py -q`. ORS_MOCK is back to 0 in /app/backend/.env (verify before/after any mock toggling). Playwright login pattern: page.evaluate fetch('/api/auth/dev-login', credentials:'include') then goto /trip/<id>. TripMap is expanded by default (localStorage tripmap-open-<tripId>); do NOT click trip-map-toggle before asserting map elements, and assert .leaflet-container / .twt-map-home / [data-testid=map-legend-return] instead of trip-map-container. Re-verify EditTripModal form-reset bug by triggering a version bump (create an expense via fetch) while the modal is open.",
+  "rca_of_the_issue": "EditTripModal reset: Trip.jsx polls via useTripSync and calls loadAll() on version change, producing a new `trip` object; EditTripModal's useEffect dependency array [open, trip] therefore re-runs setForm()/setReturnOpen() while the dialog is open, discarding user input. ExpenseModal: the date <input type=\"date\"> has min/max attributes and the surrounding form has no noValidate, so the browser's constraint validation aborts submit before React's handleSubmit runs, making the app-level range error message dead code."
+}

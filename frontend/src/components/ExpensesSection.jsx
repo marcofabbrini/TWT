@@ -1,6 +1,6 @@
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Pencil, Trash2, Receipt } from "lucide-react";
+import { Plus, Pencil, Trash2, Receipt, CalendarDays } from "lucide-react";
 
 function fmtCost(cost, currency) {
   if (cost === null || cost === undefined) return null;
@@ -15,6 +15,30 @@ function fmtCost(cost, currency) {
   }
 }
 
+function fmtDate(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function sortByDateDesc(list) {
+  return [...list].sort((a, b) => {
+    const ad = a.expense_date || "";
+    const bd = b.expense_date || "";
+    if (ad !== bd) return ad < bd ? 1 : -1;
+    const ac = a.created_at || "";
+    const bc = b.created_at || "";
+    return ac < bc ? 1 : -1;
+  });
+}
+
 export default function ExpensesSection({
   expenses,
   stopsById,
@@ -23,6 +47,7 @@ export default function ExpensesSection({
   onEdit,
   onDelete,
 }) {
+  const sorted = sortByDateDesc(expenses);
   return (
     <section className="mt-14" data-testid="expenses-section">
       <div className="flex items-end justify-between mb-6">
@@ -60,7 +85,7 @@ export default function ExpensesSection({
       ) : (
         <div className="glass rounded-2xl overflow-hidden" data-testid="expenses-list">
           <AnimatePresence>
-            {expenses.map((e) => {
+            {sorted.map((e) => {
               const stop = e.stop_id ? stopsById[e.stop_id] : null;
               return (
                 <motion.div
@@ -74,7 +99,16 @@ export default function ExpensesSection({
                 >
                   <div className="flex-1 min-w-0">
                     <div className="text-twt-text font-bold truncate">{e.label}</div>
-                    <div className="text-xs text-twt-muted flex items-center gap-3 mt-0.5">
+                    <div className="text-xs text-twt-muted flex flex-wrap items-center gap-x-3 gap-y-1 mt-0.5">
+                      {e.expense_date && (
+                        <span
+                          className="inline-flex items-center gap-1 tabular-nums"
+                          data-testid={`expense-date-${e.expense_id}`}
+                        >
+                          <CalendarDays className="w-3 h-3" />
+                          {fmtDate(e.expense_date)}
+                        </span>
+                      )}
                       <span className="glass rounded-full px-2 py-0.5">
                         {stop ? stop.title : "General"}
                       </span>

@@ -31,6 +31,7 @@ function fmtDate(iso) {
 export default function StopCard({
   stop,
   index,
+  totalStops,
   attractions,
   hotels = [],
   canEdit,
@@ -53,6 +54,15 @@ export default function StopCard({
   );
 
   const attractionIds = attractions.map((a) => a.attraction_id);
+
+  // Position badge — Start / Destination / Stop N / Start & Destination
+  const positionBadge = (() => {
+    if (!totalStops || totalStops < 1) return null;
+    if (totalStops === 1) return "Start & Destination";
+    if (index === 0) return "Start";
+    if (index === totalStops - 1) return "Destination";
+    return `Stop ${index}`;
+  })();
 
   return (
     <motion.article
@@ -78,12 +88,22 @@ export default function StopCard({
             <TransportIcon className="w-4 h-4 text-twt-teal" />
           </div>
           <div className="flex-1 min-w-0">
-            <h3
-              className="text-display text-3xl leading-tight text-twt-text"
-              data-testid={`stop-title-${stop.stop_id}`}
-            >
-              {stop.title}
-            </h3>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3
+                className="text-display text-3xl leading-tight text-twt-text"
+                data-testid={`stop-title-${stop.stop_id}`}
+              >
+                {stop.title}
+              </h3>
+              {positionBadge && (
+                <span
+                  className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full glass border border-twt-teal/25 text-twt-teal"
+                  data-testid={`stop-position-badge-${stop.stop_id}`}
+                >
+                  {positionBadge}
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-twt-muted mt-1.5">
               <span className="inline-flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5" />
