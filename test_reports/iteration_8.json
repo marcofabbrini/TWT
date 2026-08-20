@@ -1,0 +1,44 @@
+{
+  "summary": "Targeted retest of iteration_7 fixes. (1) Backend cascade: full suite 145/145 PASS (backend_test.py 23 + phase2_test.py 81 + phase3_test.py 41), including the previously failing TestTripCascadePhase3::test_delete_trip_cascades_all_six_collections. Independently verified in Mongo via /app/test_reports/cascade_check_iter8.py: seeded trip with 1 stop + 1 attraction + 1 hotel + 1 expense + 1 exchange_rate (BEFORE all counts 1) -> DELETE /api/trips/{id} returns 204 -> AFTER counts 0 for trips, trip_members, stops, attractions, hotels, expenses, exchange_rates. (2) Frontend rate-refresh: on trip TEST_UI_ITER8 (EUR home, EUR 200 hotel + USD 100 hotel, no rate) the sub-header showed 'Spend total: EUR 220.00' with '1 excluded' amber badge; saving USD->EUR=0.9 in the rates dialog updated the sub-header LIVE to EUR 310.00 and removed the missing-rates badge (verified while the dialog was still open AND after close, no reload); deleting the rate reverted the total to EUR 220.00 and restored the badge, again without reload. (3) Frontend regression all green: hotel add/edit/delete, expense add/edit/delete (totals updated to EUR 260.00 on add), attraction drag&drop reorder (Prado/Retiro -> Retiro/Prado) persisted across page reload. No console errors observed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/trips/{trip_id}/exchange-rates", "issue": "Still read-then-write upsert (find_one + insert/update) with a unique index on (trip_id,from,to) — concurrent PUTs for the same pair can raise DuplicateKeyError -> 500. Prefer update_one(..., upsert=True) with $setOnInsert rate_id. (carried over from iteration_7, not a regression)"},
+      {"endpoint": "GET /api/trips/{trip_id}/expenses", "issue": "No way to filter only general (stop_id=null) expenses; ?stop_id= matches literal '' and returns []. (carried over)"},
+      {"endpoint": "GET hotels/expenses/summary", "issue": "to_list(500/2000/5000) hard caps = silent truncation risk on large trips. (carried over)"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/phase2_test.py",
+    "/app/backend/tests/phase3_test.py",
+    "/app/test_reports/cascade_check_iter8.py",
+    "/app/test_reports/seed_ui_iter8.py",
+    "/app/test_reports/pytest/pytest_results_iter8.xml"
+  ],
+  "action_items": [
+    "Optional hardening only: make exchange-rate upsert atomic (update_one upsert=True + $setOnInsert) to avoid a 500 under concurrent PUTs.",
+    "Optional: pagination/limits for hotels/expenses/summary list queries instead of fixed to_list caps."
+  ],
+  "critical_code_review_comments": [
+    "trips.delete_trip cascade is now complete for the six child collections; consider extracting the cascade list into a constant/helper so future collections (e.g. transport, documents) are not forgotten.",
+    "ExchangeRatesDialog.onChanged is invoked after both save and delete — good; delete uses optimistic local filter while save re-loads from API, slightly inconsistent but functionally correct."
+  ],
+  "updated_files": [
+    "/app/test_reports/cascade_check_iter8.py",
+    "/app/test_reports/seed_ui_iter8.py",
+    "/app/test_reports/iteration_8.json"
+  ],
+  "success_rate": {"backend": "100% (145/145)", "frontend": "100% (rate refresh save+delete, hotel CRUD, expense CRUD, drag&drop)"},
+  "seed_data_creation": "Trip TEST_UI_ITER8 (trip_e65a8fa3804d458c, stop_0560644d9b444ab9) for alice@twt.app — EUR home, Hotel EUR 200, Hotel USD 100, attractions Prado/Retiro (order now Retiro,Prado after drag test); no exchange rate left (created and deleted during test). Orphan TEST_CASCADE_ITER8 trips cleaned up. TEST_UI_P3 from iteration_7 still present.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "test_credentials": "dev-login POST /api/auth/dev-login {email: alice@twt.app | bob@twt.app} (ENV=dev)",
+  "context_for_next_testing_agent": "Both iteration_7 defects are fixed and verified. Backend suite is 145/145; use `python -m pytest tests/ -q` from /app/backend. For UI auth in Playwright use page.request.post(BASE + '/api/auth/dev-login', data={'email':'alice@twt.app'}) — cookie is shared with the browser context. Trip route is /trip/{trip_id} (singular). Reusable helpers: /app/test_reports/seed_ui_iter8.py, cascade_check_iter8.py. Remaining open items are the minor backend ones listed above (non-blocking).",
+  "rca_of_the_issue": "Iteration_7 issue 1 root cause: delete_trip only cascaded attractions/stops/trip_members; hotels/expenses/exchange_rates now included (trips.py:117-123). Issue 2 root cause: ExchangeRatesDialog had no change callback; it now accepts onChanged and calls it after save and delete, and Trip.jsx passes onChanged={refreshSummary} (Trip.jsx:464). Both verified end-to-end."
+}

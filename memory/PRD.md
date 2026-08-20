@@ -58,6 +58,16 @@ Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) 
 - Dashboard: glass trip cards, empty state, create modal, delete confirmation.
 - Landing hero + feature grid.
 
+### Phase 3 (2026-02, verified 145/145 backend + all frontend)
+- Hotels CRUD per stop (multipli supportati), inside StopCard with edit/delete on hover.
+- Expenses CRUD tied to optional stop_id, defaults `paid_by` and `split_between` to current user (Phase 4 will expand to collaborators).
+- Manual Exchange Rates (per-trip, owner-only upsert, viewer read). Unidirectional — no automatic inversion.
+- Trip Summary aggregate endpoint: totals per bucket (hotels/attractions/expenses) in home_currency; items with missing rates are excluded and listed in `missing_rates` with affected item ids.
+- Trip sub-header shows `Spend total` and an amber warning badge (with popover + CTA) when rates are missing; live refresh after any mutation including rate save/delete.
+- Trip delete now cascades all 6 child collections (attractions, stops, hotels, expenses, exchange_rates, trip_members).
+- Legacy data migration: `/app/backend/scripts/normalize_orders.py` renormalized pre-fix duplicate orders; idempotent.
+- Refactor: `useDndReorder` hook + reusable `ConfirmDeleteDialog` extracted from Trip.jsx.
+
 ### Phase 2 (2026-02, verified 104/104 backend + all frontend, 0 orphans, 0 duplicate orders)
 - Stops CRUD (create/list/patch/delete) with cascade on stop delete and full-permutation reorder.
 - Attractions CRUD with atomic cross-stop reorder (computes canonical final layout in Python + single bulk_write).

@@ -22,6 +22,10 @@ from auth import router as auth_router  # noqa: E402
 from trips import router as trips_router  # noqa: E402
 from stops import router as stops_router  # noqa: E402
 from attractions import stop_router as attractions_stop_router, trip_router as attractions_trip_router  # noqa: E402
+from hotels import stop_router as hotels_stop_router, trip_router as hotels_trip_router  # noqa: E402
+from expenses import router as expenses_router  # noqa: E402
+from exchange_rates import router as rates_router  # noqa: E402
+from summary import router as summary_router  # noqa: E402
 
 app = FastAPI(
     title="TWT — Trip Without Trap",
@@ -49,6 +53,11 @@ api_router.include_router(trips_router)
 api_router.include_router(stops_router)
 api_router.include_router(attractions_stop_router)
 api_router.include_router(attractions_trip_router)
+api_router.include_router(hotels_stop_router)
+api_router.include_router(hotels_trip_router)
+api_router.include_router(expenses_router)
+api_router.include_router(rates_router)
+api_router.include_router(summary_router)
 app.include_router(api_router)
 
 # CORS — allow credentials so the httpOnly cookie flows in cross-origin requests.

@@ -113,9 +113,12 @@ async def delete_trip(trip_id: str, current_user: dict = Depends(require_auth)):
     if trip_doc["owner_id"] != current_user["user_id"]:
         raise HTTPException(status_code=403, detail="Only the owner can delete this trip")
 
-    # Cascade: attractions → stops → trip_members → trip.
+    # Cascade: attractions → stops → hotels → expenses → exchange_rates → trip_members → trip.
     await db.attractions.delete_many({"trip_id": trip_id})
     await db.stops.delete_many({"trip_id": trip_id})
+    await db.hotels.delete_many({"trip_id": trip_id})
+    await db.expenses.delete_many({"trip_id": trip_id})
+    await db.exchange_rates.delete_many({"trip_id": trip_id})
     await db.trip_members.delete_many({"trip_id": trip_id})
     await db.trips.delete_one({"trip_id": trip_id})
     logger.info("trips.delete trip_id=%s by=%s (cascade)", trip_id, current_user["user_id"])

@@ -252,37 +252,196 @@ class ReorderAttractions(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────
-# FUTURE SCHEMAS — NOT EXPOSED YET (Phase 3+)
+# HOTEL (Phase 3)
 # ─────────────────────────────────────────────────────────────
-#
-# class Hotel(BaseModel):
-#     hotel_id: str
-#     stop_id: str
-#     trip_id: str
-#     name: str
-#     check_in: date
-#     check_out: date
-#     price_amount: float
-#     price_currency: str
-#     booking_url: Optional[str] = None
-#     notes: Optional[str] = None
-#
-# class Expense(BaseModel):
-#     expense_id: str
-#     trip_id: str
-#     stop_id: Optional[str] = None
-#     category: str
-#     amount: float
-#     currency: str
-#     amount_in_home_currency: float
-#     paid_by: str
-#     description: Optional[str] = None
-#     occurred_at: datetime
-#     created_at: datetime
-#
-# class ExchangeRate(BaseModel):
-#     rate_id: str
-#     base_currency: str
-#     quote_currency: str
-#     rate: float
-#     fetched_at: datetime
+def _validate_link(v):
+    if v is None or v == "":
+        return v
+    v = v.strip()
+    low = v.lower()
+    if not (low.startswith("http://") or low.startswith("https://")):
+        raise ValueError("must start with http:// or https://")
+    return v
+
+
+def _validate_currency(v):
+    if v is None:
+        return v
+    v = v.upper()
+    if v not in SUPPORTED_CURRENCIES:
+        raise ValueError(f"currency must be one of {SUPPORTED_CURRENCIES}")
+    return v
+
+
+class HotelBase(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    location: Optional[str] = Field(default=None, max_length=200)
+    check_in: date
+    check_out: date
+    cost: float = Field(ge=0)
+    currency: Optional[str] = None
+    booking_link: Optional[str] = Field(default=None, max_length=500)
+    cancellation_deadline: Optional[date] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("currency")
+    @classmethod
+    def _cur(cls, v):
+        return _validate_currency(v)
+
+    @field_validator("booking_link")
+    @classmethod
+    def _link(cls, v):
+        return _validate_link(v)
+
+    @field_validator("check_out")
+    @classmethod
+    def _check_out_after(cls, v, info):
+        ci = info.data.get("check_in")
+        if ci and v < ci:
+            raise ValueError("check_out must be >= check_in")
+        return v
+
+
+class HotelCreate(HotelBase):
+    pass
+
+
+class HotelUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    location: Optional[str] = Field(default=None, max_length=200)
+    check_in: Optional[date] = None
+    check_out: Optional[date] = None
+    cost: Optional[float] = Field(default=None, ge=0)
+    currency: Optional[str] = None
+    booking_link: Optional[str] = Field(default=None, max_length=500)
+    cancellation_deadline: Optional[date] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("currency")
+    @classmethod
+    def _cur(cls, v):
+        return _validate_currency(v)
+
+    @field_validator("booking_link")
+    @classmethod
+    def _link(cls, v):
+        return _validate_link(v)
+
+
+class Hotel(HotelBase):
+    model_config = ConfigDict(extra="ignore")
+    hotel_id: str
+    trip_id: str
+    stop_id: str
+    currency: str  # concrete after create (defaults to trip.home_currency)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ─────────────────────────────────────────────────────────────
+# EXPENSE (Phase 3)
+# ─────────────────────────────────────────────────────────────
+class ExpenseBase(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    cost: float = Field(ge=0)
+    currency: Optional[str] = None
+    stop_id: Optional[str] = None
+    split_between: List[str] = Field(default_factory=list)
+    paid_by: Optional[str] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("currency")
+    @classmethod
+    def _cur(cls, v):
+        return _validate_currency(v)
+
+
+class ExpenseCreate(ExpenseBase):
+    pass
+
+
+class ExpenseUpdate(BaseModel):
+    label: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    cost: Optional[float] = Field(default=None, ge=0)
+    currency: Optional[str] = None
+    stop_id: Optional[str] = None
+    split_between: Optional[List[str]] = None
+    paid_by: Optional[str] = None
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("currency")
+    @classmethod
+    def _cur(cls, v):
+        return _validate_currency(v)
+
+
+class Expense(ExpenseBase):
+    model_config = ConfigDict(extra="ignore")
+    expense_id: str
+    trip_id: str
+    currency: str  # concrete after create
+    paid_by: str
+    split_between: List[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+# ─────────────────────────────────────────────────────────────
+# EXCHANGE RATE (Phase 3, manual only)
+# ─────────────────────────────────────────────────────────────
+class ExchangeRateUpsert(BaseModel):
+    from_currency: str
+    to_currency: str
+    rate: float = Field(gt=0)
+
+    @field_validator("from_currency", "to_currency")
+    @classmethod
+    def _cur(cls, v):
+        v = v.upper()
+        if v not in SUPPORTED_CURRENCIES:
+            raise ValueError(f"currency must be one of {SUPPORTED_CURRENCIES}")
+        return v
+
+    @field_validator("to_currency")
+    @classmethod
+    def _not_same(cls, v, info):
+        f = info.data.get("from_currency")
+        if f and f == v:
+            raise ValueError("from_currency and to_currency must differ")
+        return v
+
+
+class ExchangeRate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    rate_id: str
+    trip_id: str
+    from_currency: str
+    to_currency: str
+    rate: float
+    updated_at: datetime = Field(default_factory=utcnow)
+    updated_by: str
+
+
+# ─────────────────────────────────────────────────────────────
+# SUMMARY (Phase 3)
+# ─────────────────────────────────────────────────────────────
+class MissingRate(BaseModel):
+    from_currency: str = Field(alias="from")
+    to_currency: str = Field(alias="to")
+    affected_items: List[str]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class TripSummary(BaseModel):
+    total_km: Optional[float] = None
+    total_cost_home_currency: float
+    home_currency: str
+    breakdown: dict
+    missing_rates: List[dict]
+
+
+# ─────────────────────────────────────────────────────────────
+# LEGACY future-schema comment removed — hotels/expenses/rates now live above.
+# ─────────────────────────────────────────────────────────────

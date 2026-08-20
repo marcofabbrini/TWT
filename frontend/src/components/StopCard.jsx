@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { transportOf } from "@/lib/transport";
 import AttractionItem from "@/components/AttractionItem";
+import HotelList from "@/components/HotelList";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -31,12 +32,16 @@ export default function StopCard({
   stop,
   index,
   attractions,
+  hotels = [],
   canEdit,
   onEditStop,
   onDeleteStop,
   onAddAttraction,
   onEditAttraction,
   onDeleteAttraction,
+  onAddHotel,
+  onEditHotel,
+  onDeleteHotel,
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `stop-drop-${stop.stop_id}`,
@@ -185,6 +190,16 @@ export default function StopCard({
             </button>
           )}
         </div>
+
+        {/* Hotels block */}
+        <HotelList
+          hotels={hotels}
+          canEdit={canEdit}
+          stopId={stop.stop_id}
+          onAdd={() => onAddHotel?.(stop)}
+          onEdit={(h) => onEditHotel?.(h)}
+          onDelete={(h) => onDeleteHotel?.(h)}
+        />
       </div>
     </motion.article>
   );

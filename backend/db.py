@@ -45,4 +45,19 @@ async def ensure_indexes() -> None:
         [("trip_id", ASCENDING), ("stop_id", ASCENDING), ("order", ASCENDING)]
     )
 
+    # hotels (Phase 3)
+    await db.hotels.create_index("hotel_id", unique=True)
+    await db.hotels.create_index([("trip_id", ASCENDING), ("stop_id", ASCENDING)])
+
+    # expenses (Phase 3)
+    await db.expenses.create_index("expense_id", unique=True)
+    await db.expenses.create_index("trip_id")
+
+    # exchange_rates (Phase 3)
+    await db.exchange_rates.create_index("rate_id", unique=True)
+    await db.exchange_rates.create_index(
+        [("trip_id", ASCENDING), ("from_currency", ASCENDING), ("to_currency", ASCENDING)],
+        unique=True,
+    )
+
     logger.info("MongoDB indexes ensured")

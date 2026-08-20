@@ -1,0 +1,44 @@
+{
+  "summary": "TWT Phase 3 full test pass (backend + frontend). Created /app/backend/tests/phase3_test.py (41 tests: hotels CRUD/validation/role-gating, expenses CRUD/filter/defaults, exchange-rates owner-only upsert/validations/delete, summary conversion matrix incl. unidirectional rate check, trip cascade). Result: 40/41 pass — the ONLY backend failure is the suspected cascade gap: DELETE /api/trips/{trip_id} does NOT delete hotels/expenses/exchange_rates. Regression Phase 1+2 (backend_test.py 23 + phase2_test.py 81) = 104/104 pass; full suite 144 passed / 1 failed. Migration /app/backend/scripts/normalize_orders.py re-run is idempotent (stops modified=0, attractions modified=0). Frontend: seeded trip TEST_UI_P3 (trip_8a85bb217d11403f), dev-login alice — spend total, missing-rates amber badge + popover + CTA, rates dialog (both entry points), hotel add/edit/delete, expenses add, and attraction drag&drop regression (persisted) all work. ONE frontend integration bug: after saving/deleting a rate in ExchangeRatesDialog the sub-header total and missing-rates badge are NOT refreshed (stale until another mutation or page reload).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "DELETE /api/trips/{trip_id}", "issue": "Cascade is incomplete: hotels, expenses and exchange_rates survive trip deletion (verified in Mongo: {'stops':0,'attractions':0,'trip_members':0,'hotels':1,'expenses':1,'exchange_rates':1}). Orphan data grows and can leak into a re-created trip_id namespace. trips.delete_trip must also delete_many on db.hotels, db.expenses, db.exchange_rates.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "PUT /api/trips/{trip_id}/exchange-rates", "issue": "Upsert is read-then-write (find_one + update/insert) while a unique index exists on (trip_id,from,to); two concurrent PUTs for the same pair can raise DuplicateKeyError -> 500. Use update_one(..., upsert=True) with $setOnInsert rate_id."},
+      {"endpoint": "GET /api/trips/{trip_id}/expenses", "issue": "No way to request only general (stop_id=null) expenses: ?stop_id= (empty) matches literal '' and returns []. Consider ?stop_id=none / ?general=true semantics."},
+      {"endpoint": "GET hotels/expenses/summary", "issue": "Unbounded to_list(500/2000/5000) caps are silent truncation risks for large trips (same note as iteration_6)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Exchange rate save/delete -> trip totals", "issue": "After saving USD->EUR=0.9 in the rates dialog, the rate row appears in the dialog, but the sub-header 'Spend total' stays at the stale value (€460.00) and the amber 'X excluded' badge remains visible even after the dialog closes. Correct value (€478 / badge gone) only appears after an unrelated mutation (hotel/expense) or a page reload. Root cause: ExchangeRatesDialog has no onSaved/onChanged callback and Trip.jsx never calls refreshSummary() on rate mutation or when ratesOpen closes. Same applies to rate deletion.", "affected_selectors": ["[data-testid=\"rate-save-btn\"]", "[data-testid=\"trip-spend-total\"]", "[data-testid=\"missing-rates-btn\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Trip page sub-header", "issues": ["TripTotals is `hidden md:flex`, so on mobile (<768px) the user has no access to Spend total nor to the missing-rates warning — the only remaining rates entry point is the small coin icon. Consider a compact mobile variant."]},
+      {"screen": "Attraction / hotel drag & drop", "issues": ["useDndReorder registers only PointerSensor — no KeyboardSensor, so reordering is impossible without a pointer (a11y gap)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/phase3_test.py", "/app/backend/tests/phase2_test.py", "/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml", "/app/test_reports/seed_ui_p3.py"],
+  "action_items": [
+    "FIX (HIGH): trips.delete_trip must cascade db.hotels, db.expenses, db.exchange_rates (test already written: phase3_test.py::TestTripCascadePhase3::test_delete_trip_cascades_all_six_collections).",
+    "FIX (HIGH): refresh the trip summary after rate create/update/delete — add an onSaved/onChanged prop to ExchangeRatesDialog (or call refreshSummary() when ratesOpen turns false) so trip-spend-total and missing-rates-btn update immediately.",
+    "Optional: make the rate upsert atomic (update_one upsert=True + $setOnInsert) to avoid DuplicateKeyError 500 under concurrency.",
+    "Optional: expose Spend total / missing-rates on mobile; add KeyboardSensor for DnD a11y."
+  ],
+  "critical_code_review_comments": [
+    "hotels.py PATCH correctly revalidates the EFFECTIVE (check_in, check_out) range and returns 422 without mutating — verified; HotelUpdate itself has no cross-field validator, so this route-level check is the only guard (keep it if other write paths are added).",
+    "summary.py convert() is strictly unidirectional (only looks up (item_currency, home_currency)) — verified no implicit inversion; missing items are excluded from the total and reported with affected item ids.",
+    "summary.py attractions query filters cost {$ne: null, $gt: 0}: attractions with cost 0 are skipped entirely (harmless) but a null-currency legacy attraction falls back to home_currency, which silently counts it as home money — acceptable for now, worth a data note.",
+    "Trip.jsx is 564 lines and already close to the split threshold; the rates/summary wiring gap above is a symptom of the growing state surface — consider a useTripData hook."
+  ],
+  "updated_files": ["/app/backend/tests/phase3_test.py", "/app/test_reports/seed_ui_p3.py"],
+  "success_rate": {"backend": "97.6% (40/41 phase3) — 144/145 including regression", "frontend": "86% (6/7 checks: a,b,d,e,f,g pass; c fails)"},
+  "seed_data_creation": "UI trip TEST_UI_P3 = trip_8a85bb217d11403f (stops stop_1d3390acd0cb4c07 Lisbon / stop_f2dcaf417a0a4905 Porto, 3 attractions incl. one USD, 1 hotel EUR 300, expenses 'Rental car' 120 + TEST_UI_Expense 25, rate USD->EUR 0.9). Re-seed with: python /app/test_reports/seed_ui_p3.py. Pytest data is self-cleaning.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "dev-login alice@twt.app (owner), bob@twt.app (viewer), carol@twt.app (editor/non-member) — ENV=dev",
+  "context_for_next_testing_agent": "Suite = 145 tests: backend_test.py (23) + phase2_test.py (81) + phase3_test.py (41). Run: cd /app/backend && python -m pytest tests/ -q. Only known failure = TestTripCascadePhase3 (missing hotels/expenses/exchange_rates cascade in trips.delete_trip). Frontend: dev-login inside the browser via page.evaluate fetch('/api/auth/dev-login') then goto /trip/{id}; TripTotals is hidden below md so use viewport >= 1280. DnD needs incremental mouse moves (>6px activation distance) on the grip svg inside [data-testid^=attraction-item-]. After the rates-refresh fix, re-verify check (c): add USD->EUR rate then assert trip-spend-total updates and missing-rates-btn disappears WITHOUT reload.",
+  "rca_of_the_issue": "(1) Cascade: trips.delete_trip was written in Phase 1 and only deletes attractions/stops/trip_members; Phase 3 collections were never added, so hotels/expenses/exchange_rates remain keyed to a deleted trip_id. (2) Totals staleness: Trip.jsx calls refreshSummary() after every stop/attraction/hotel/expense mutation, but ExchangeRatesDialog owns its rate mutations locally (api.put/api.delete + local load()) and exposes no change callback; Trip.jsx also does not refresh on ratesOpen -> false, so the summary state keeps the pre-rate value until any other mutation triggers refreshSummary()."
+}

@@ -1,43 +1,34 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   ArrowLeft,
   CalendarDays,
-  Coins,
   Loader2,
   Plus,
   MapPinned,
-  Route,
   Compass,
+  Coins,
 } from "lucide-react";
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  closestCorners,
-  DragOverlay,
-} from "@dnd-kit/core";
+import { DndContext, closestCorners, DragOverlay } from "@dnd-kit/core";
+
 import Header from "@/components/Header";
 import StopCard from "@/components/StopCard";
 import StopModal from "@/components/StopModal";
 import AttractionModal from "@/components/AttractionModal";
 import AttractionItem from "@/components/AttractionItem";
+import HotelModal from "@/components/HotelModal";
+import ExpenseModal from "@/components/ExpenseModal";
+import ExpensesSection from "@/components/ExpensesSection";
+import ExchangeRatesDialog from "@/components/ExchangeRatesDialog";
+import TripTotals from "@/components/TripTotals";
+import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
+import useDndReorder from "@/hooks/useDndReorder";
+
 import { api } from "@/lib/api";
-import { canEdit } from "@/lib/permissions";
-import { transportOf } from "@/lib/transport";
+import { canEdit as canEditRole } from "@/lib/permissions";
 import { toast } from "sonner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { transportOf } from "@/lib/transport";
 
 function fmtLongDate(iso) {
   return new Date(iso).toLocaleDateString("en-US", {
@@ -58,7 +49,9 @@ export default function Trip() {
   const [trip, setTrip] = useState(null);
   const [error, setError] = useState("");
   const [stops, setStops] = useState([]);
-  const [attractionsByStop, setAttractionsByStop] = useState({}); // { stop_id: [...] }
+  const [hotelsByStop, setHotelsByStop] = useState({});
+  const [expenses, setExpenses] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const [stopModal, setStopModal] = useState({ open: false, editing: null });
@@ -67,55 +60,95 @@ export default function Trip() {
     stopId: null,
     editing: null,
   });
+  const [hotelModal, setHotelModal] = useState({
+    open: false,
+    stopId: null,
+    editing: null,
+  });
+  const [expenseModal, setExpenseModal] = useState({ open: false, editing: null });
+  const [ratesOpen, setRatesOpen] = useState(false);
   const [pendingStopDelete, setPendingStopDelete] = useState(null);
   const [pendingAttrDelete, setPendingAttrDelete] = useState(null);
+  const [pendingHotelDelete, setPendingHotelDelete] = useState(null);
+  const [pendingExpDelete, setPendingExpDelete] = useState(null);
 
-  const [dragging, setDragging] = useState(null); // active attraction while dragging
+  const editable = trip ? canEditRole(trip.role) : false;
+  const isOwner = trip?.role === "owner";
 
-  const editable = trip ? canEdit(trip.role) : false;
+  const {
+    attractionsByStop,
+    setAttractionsByStop,
+    dragging,
+    sensors,
+    onDragStart,
+    onDragEnd,
+    onDragCancel,
+  } = useDndReorder({ tripId: trip_id });
+
+  const refreshSummary = useCallback(async () => {
+    try {
+      const { data } = await api.get(`/trips/${trip_id}/summary`);
+      setSummary(data);
+    } catch (e) {
+      /* non-fatal */
+    }
+  }, [trip_id]);
 
   const loadAll = useCallback(async () => {
     try {
-      const [tripRes, stopsRes] = await Promise.all([
+      const [tripRes, stopsRes, expRes] = await Promise.all([
         api.get(`/trips/${trip_id}`),
         api.get(`/trips/${trip_id}/stops`),
+        api.get(`/trips/${trip_id}/expenses`),
       ]);
       setTrip(tripRes.data);
-      const sortedStops = [...stopsRes.data].sort(
-        (a, b) => a.order - b.order
-      );
+      const sortedStops = [...stopsRes.data].sort((a, b) => a.order - b.order);
       setStops(sortedStops);
+      setExpenses(expRes.data);
 
-      const attrEntries = await Promise.all(
-        sortedStops.map(async (s) => {
-          const { data } = await api.get(
-            `/trips/${trip_id}/stops/${s.stop_id}/attractions`
-          );
-          return [s.stop_id, data.sort((a, b) => a.order - b.order)];
-        })
-      );
+      const [attrEntries, hotelEntries] = await Promise.all([
+        Promise.all(
+          sortedStops.map(async (s) => {
+            const { data } = await api.get(`/trips/${trip_id}/stops/${s.stop_id}/attractions`);
+            return [s.stop_id, data.sort((a, b) => a.order - b.order)];
+          })
+        ),
+        Promise.all(
+          sortedStops.map(async (s) => {
+            const { data } = await api.get(`/trips/${trip_id}/stops/${s.stop_id}/hotels`);
+            return [s.stop_id, data];
+          })
+        ),
+      ]);
       setAttractionsByStop(Object.fromEntries(attrEntries));
+      setHotelsByStop(Object.fromEntries(hotelEntries));
+      refreshSummary();
     } catch (e) {
       setError(e?.response?.status === 404 ? "Trip not found" : "Failed to load trip");
     } finally {
       setLoading(false);
     }
-  }, [trip_id]);
+  }, [trip_id, setAttractionsByStop, refreshSummary]);
 
   useEffect(() => {
     loadAll();
   }, [loadAll]);
 
-  // ── Stops handlers ──────────────────────────────────
+  const stopsById = useMemo(
+    () => Object.fromEntries(stops.map((s) => [s.stop_id, s])),
+    [stops]
+  );
+
+  // Stops handlers
   const handleStopSaved = (stop, kind) => {
     if (kind === "create") {
       setStops((prev) => [...prev, stop].sort((a, b) => a.order - b.order));
       setAttractionsByStop((prev) => ({ ...prev, [stop.stop_id]: [] }));
+      setHotelsByStop((prev) => ({ ...prev, [stop.stop_id]: [] }));
     } else {
-      setStops((prev) =>
-        prev.map((s) => (s.stop_id === stop.stop_id ? stop : s))
-      );
+      setStops((prev) => prev.map((s) => (s.stop_id === stop.stop_id ? stop : s)));
     }
+    refreshSummary();
   };
 
   const confirmDeleteStop = async () => {
@@ -126,23 +159,30 @@ export default function Trip() {
       await api.delete(`/trips/${trip_id}/stops/${id}`);
       setStops((prev) => prev.filter((s) => s.stop_id !== id));
       setAttractionsByStop((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
+        const n = { ...prev };
+        delete n[id];
+        return n;
       });
+      setHotelsByStop((prev) => {
+        const n = { ...prev };
+        delete n[id];
+        return n;
+      });
+      // A stop delete may leave expenses referring to a gone stop_id. Reload expenses.
+      const { data } = await api.get(`/trips/${trip_id}/expenses`);
+      setExpenses(data);
       toast.success("Stop removed");
+      refreshSummary();
     } catch (e) {
       toast.error("Could not delete stop");
     }
   };
 
-  // ── Attractions handlers ────────────────────────────
+  // Attractions handlers
   const handleAttractionSaved = (attr, kind) => {
     setAttractionsByStop((prev) => {
       const list = prev[attr.stop_id] || [];
-      if (kind === "create") {
-        return { ...prev, [attr.stop_id]: [...list, attr] };
-      }
+      if (kind === "create") return { ...prev, [attr.stop_id]: [...list, attr] };
       return {
         ...prev,
         [attr.stop_id]: list.map((a) =>
@@ -150,6 +190,7 @@ export default function Trip() {
         ),
       };
     });
+    refreshSummary();
   };
 
   const confirmDeleteAttraction = async () => {
@@ -160,117 +201,63 @@ export default function Trip() {
       await api.delete(`/trips/${trip_id}/attractions/${attraction_id}`);
       setAttractionsByStop((prev) => ({
         ...prev,
-        [stop_id]: (prev[stop_id] || []).filter(
-          (a) => a.attraction_id !== attraction_id
-        ),
+        [stop_id]: (prev[stop_id] || []).filter((a) => a.attraction_id !== attraction_id),
       }));
       toast.success("Attraction removed");
+      refreshSummary();
     } catch (e) {
       toast.error("Could not delete attraction");
     }
   };
 
-  // ── Drag & Drop ─────────────────────────────────────
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } })
-  );
-
-  const findStopIdOf = useCallback(
-    (attrId) => {
-      for (const [sid, list] of Object.entries(attractionsByStop)) {
-        if (list.some((a) => a.attraction_id === attrId)) return sid;
-      }
-      return null;
-    },
-    [attractionsByStop]
-  );
-
-  const handleDragStart = ({ active }) => {
-    const attr = findAttraction(active.id);
-    setDragging(attr);
+  // Hotels handlers
+  const handleHotelSaved = (hotel, kind) => {
+    setHotelsByStop((prev) => {
+      const list = prev[hotel.stop_id] || [];
+      if (kind === "create") return { ...prev, [hotel.stop_id]: [...list, hotel] };
+      return {
+        ...prev,
+        [hotel.stop_id]: list.map((h) => (h.hotel_id === hotel.hotel_id ? hotel : h)),
+      };
+    });
+    refreshSummary();
   };
 
-  const findAttraction = (id) => {
-    for (const list of Object.values(attractionsByStop)) {
-      const a = list.find((x) => x.attraction_id === id);
-      if (a) return a;
-    }
-    return null;
-  };
-
-  const resolveOverTarget = (over) => {
-    if (!over) return null;
-    if (over.data.current?.type === "stop-drop-zone") {
-      return { stopId: over.data.current.stop_id, overIndex: -1 };
-    }
-    if (over.data.current?.type === "attraction") {
-      const stopId = over.data.current.stop_id;
-      const list = attractionsByStop[stopId] || [];
-      const overIndex = list.findIndex((a) => a.attraction_id === over.id);
-      return { stopId, overIndex };
-    }
-    return null;
-  };
-
-  const handleDragEnd = async ({ active, over }) => {
-    setDragging(null);
-    if (!over || active.id === over.id) return;
-
-    const activeStopId = findStopIdOf(active.id);
-    const target = resolveOverTarget(over);
-    if (!activeStopId || !target) return;
-
-    const previousState = attractionsByStop;
-    const source = [...(attractionsByStop[activeStopId] || [])];
-    const activeIndex = source.findIndex((a) => a.attraction_id === active.id);
-    if (activeIndex === -1) return;
-    const [moved] = source.splice(activeIndex, 1);
-
-    let next = { ...attractionsByStop, [activeStopId]: source };
-
-    if (target.stopId === activeStopId) {
-      // reorder within same stop
-      let insertAt = target.overIndex === -1 ? source.length : target.overIndex;
-      if (insertAt > source.length) insertAt = source.length;
-      const rebuilt = [...source];
-      rebuilt.splice(insertAt, 0, { ...moved });
-      next = { ...next, [activeStopId]: rebuilt };
-    } else {
-      const targetList = [...(attractionsByStop[target.stopId] || [])];
-      const insertAt =
-        target.overIndex === -1 ? targetList.length : target.overIndex;
-      targetList.splice(insertAt, 0, { ...moved, stop_id: target.stopId });
-      next = { ...next, [target.stopId]: targetList };
-    }
-
-    setAttractionsByStop(next);
-
-    // Compute all "moves" that changed (stop_id or order) vs previous state.
-    const moves = [];
-    for (const [sid, list] of Object.entries(next)) {
-      list.forEach((a, idx) => {
-        const prevList = previousState[sid] || [];
-        const prevIdx = prevList.findIndex(
-          (p) => p.attraction_id === a.attraction_id
-        );
-        const wasHere = prevIdx !== -1;
-        const orderChanged = wasHere && prevIdx !== idx;
-        if (!wasHere || orderChanged) {
-          moves.push({
-            attraction_id: a.attraction_id,
-            target_stop_id: sid,
-            new_order: idx,
-          });
-        }
-      });
-    }
-    if (moves.length === 0) return;
-
+  const confirmDeleteHotel = async () => {
+    if (!pendingHotelDelete) return;
+    const { hotel_id, stop_id } = pendingHotelDelete;
+    setPendingHotelDelete(null);
     try {
-      await api.post(`/trips/${trip_id}/attractions/reorder`, { moves });
+      await api.delete(`/trips/${trip_id}/hotels/${hotel_id}`);
+      setHotelsByStop((prev) => ({
+        ...prev,
+        [stop_id]: (prev[stop_id] || []).filter((h) => h.hotel_id !== hotel_id),
+      }));
+      toast.success("Hotel removed");
+      refreshSummary();
     } catch (e) {
-      setAttractionsByStop(previousState);
-      toast.error("Reorder failed — reverted");
+      toast.error("Could not delete hotel");
+    }
+  };
+
+  // Expenses handlers
+  const handleExpenseSaved = (exp, kind) => {
+    if (kind === "create") setExpenses((prev) => [exp, ...prev]);
+    else setExpenses((prev) => prev.map((e) => (e.expense_id === exp.expense_id ? exp : e)));
+    refreshSummary();
+  };
+
+  const confirmDeleteExpense = async () => {
+    if (!pendingExpDelete) return;
+    const id = pendingExpDelete.expense_id;
+    setPendingExpDelete(null);
+    try {
+      await api.delete(`/trips/${trip_id}/expenses/${id}`);
+      setExpenses((prev) => prev.filter((e) => e.expense_id !== id));
+      toast.success("Cost removed");
+      refreshSummary();
+    } catch (e) {
+      toast.error("Could not delete cost");
     }
   };
 
@@ -294,13 +281,8 @@ export default function Trip() {
       <div className="min-h-screen">
         <Header />
         <main className="max-w-4xl mx-auto px-6 py-16">
-          <div
-            className="glass rounded-2xl px-6 py-10 text-center"
-            data-testid="trip-error"
-          >
-            <div className="text-display text-3xl mb-2">
-              Oh — {error.toLowerCase()}.
-            </div>
+          <div className="glass rounded-2xl px-6 py-10 text-center" data-testid="trip-error">
+            <div className="text-display text-3xl mb-2">Oh — {error.toLowerCase()}.</div>
             <Link
               to="/dashboard"
               className="text-twt-teal hover:underline text-sm"
@@ -318,7 +300,6 @@ export default function Trip() {
     <div className="min-h-screen">
       <Header />
 
-      {/* Sticky trip sub-header */}
       <div className="sticky top-16 z-30 backdrop-blur-xl bg-[#08090C]/70 border-b border-white/[0.06]">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center gap-4">
           <Link
@@ -330,10 +311,7 @@ export default function Trip() {
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <div className="flex-1 min-w-0">
-            <h1
-              className="text-display text-2xl leading-none truncate"
-              data-testid="trip-title"
-            >
+            <h1 className="text-display text-2xl leading-none truncate" data-testid="trip-title">
               {trip.title}
             </h1>
             <div className="flex items-center gap-3 text-xs text-twt-muted mt-1">
@@ -351,19 +329,16 @@ export default function Trip() {
           >
             {trip.role}
           </span>
-          <div
-            className="hidden md:flex items-center gap-4 text-xs text-twt-muted"
-            data-testid="trip-totals"
+          <TripTotals summary={summary} onOpenRates={() => setRatesOpen(true)} />
+          <button
+            type="button"
+            onClick={() => setRatesOpen(true)}
+            className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
+            data-testid="rates-open-btn"
+            aria-label="Exchange rates"
           >
-            <span className="inline-flex items-center gap-1.5">
-              <Route className="w-3.5 h-3.5 text-twt-teal" />
-              KM total: <span className="text-twt-text/70">—</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Coins className="w-3.5 h-3.5 text-twt-teal" />
-              Spend total: <span className="text-twt-text/70">—</span>
-            </span>
-          </div>
+            <Coins className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -374,60 +349,48 @@ export default function Trip() {
           <DndContext
             sensors={sensors}
             collisionDetection={closestCorners}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-            onDragCancel={() => setDragging(null)}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            onDragCancel={onDragCancel}
           >
             <div className="relative pl-6">
-              {/* timeline spine */}
               <div
                 aria-hidden
                 className="absolute top-3 bottom-3 left-0 w-px bg-gradient-to-b from-twt-teal/40 via-white/10 to-transparent"
               />
-
               <div className="space-y-8">
                 {stops.map((s, idx) => (
                   <React.Fragment key={s.stop_id}>
-                    {idx > 0 && (
-                      <KmChip
-                        km={s.km_from_prev}
-                        transport={s.transport_mode}
-                      />
-                    )}
+                    {idx > 0 && <KmChip km={s.km_from_prev} transport={s.transport_mode} />}
                     <StopCard
                       stop={s}
                       index={idx}
                       attractions={attractionsByStop[s.stop_id] || []}
+                      hotels={hotelsByStop[s.stop_id] || []}
                       canEdit={editable}
-                      onEditStop={(stop) =>
-                        setStopModal({ open: true, editing: stop })
-                      }
+                      onEditStop={(stop) => setStopModal({ open: true, editing: stop })}
                       onDeleteStop={(stop) => setPendingStopDelete(stop)}
                       onAddAttraction={(stop) =>
-                        setAttractionModal({
-                          open: true,
-                          stopId: stop.stop_id,
-                          editing: null,
-                        })
+                        setAttractionModal({ open: true, stopId: stop.stop_id, editing: null })
                       }
                       onEditAttraction={(attr) =>
-                        setAttractionModal({
-                          open: true,
-                          stopId: attr.stop_id,
-                          editing: attr,
-                        })
+                        setAttractionModal({ open: true, stopId: attr.stop_id, editing: attr })
                       }
                       onDeleteAttraction={(attr) => setPendingAttrDelete(attr)}
+                      onAddHotel={(stop) =>
+                        setHotelModal({ open: true, stopId: stop.stop_id, editing: null })
+                      }
+                      onEditHotel={(hotel) =>
+                        setHotelModal({ open: true, stopId: hotel.stop_id, editing: hotel })
+                      }
+                      onDeleteHotel={(hotel) => setPendingHotelDelete(hotel)}
                     />
                   </React.Fragment>
                 ))}
               </div>
             </div>
-
             <DragOverlay dropAnimation={null}>
-              {dragging ? (
-                <AttractionItem attraction={dragging} canEdit={false} isOverlay />
-              ) : null}
+              {dragging ? <AttractionItem attraction={dragging} canEdit={false} isOverlay /> : null}
             </DragOverlay>
           </DndContext>
         )}
@@ -446,9 +409,17 @@ export default function Trip() {
             </motion.button>
           </div>
         )}
+
+        <ExpensesSection
+          expenses={expenses}
+          stopsById={stopsById}
+          canEdit={editable}
+          onAdd={() => setExpenseModal({ open: true, editing: null })}
+          onEdit={(e) => setExpenseModal({ open: true, editing: e })}
+          onDelete={(e) => setPendingExpDelete(e)}
+        />
       </main>
 
-      {/* Stop modal */}
       <StopModal
         open={stopModal.open}
         onOpenChange={(v) => setStopModal((s) => ({ ...s, open: v }))}
@@ -457,8 +428,6 @@ export default function Trip() {
         editingStop={stopModal.editing}
         onSaved={handleStopSaved}
       />
-
-      {/* Attraction modal */}
       <AttractionModal
         open={attractionModal.open}
         onOpenChange={(v) => setAttractionModal((s) => ({ ...s, open: v }))}
@@ -468,80 +437,75 @@ export default function Trip() {
         editingAttraction={attractionModal.editing}
         onSaved={handleAttractionSaved}
       />
+      <HotelModal
+        open={hotelModal.open}
+        onOpenChange={(v) => setHotelModal((s) => ({ ...s, open: v }))}
+        tripId={trip_id}
+        stopId={hotelModal.stopId}
+        trip={trip}
+        editingHotel={hotelModal.editing}
+        onSaved={handleHotelSaved}
+      />
+      <ExpenseModal
+        open={expenseModal.open}
+        onOpenChange={(v) => setExpenseModal((s) => ({ ...s, open: v }))}
+        tripId={trip_id}
+        trip={trip}
+        stops={stops}
+        editingExpense={expenseModal.editing}
+        onSaved={handleExpenseSaved}
+      />
+      <ExchangeRatesDialog
+        open={ratesOpen}
+        onOpenChange={setRatesOpen}
+        tripId={trip_id}
+        trip={trip}
+        isOwner={isOwner}
+        onChanged={refreshSummary}
+      />
 
-      {/* Delete stop dialog */}
-      <AlertDialog
+      <ConfirmDeleteDialog
         open={!!pendingStopDelete}
         onOpenChange={(v) => !v && setPendingStopDelete(null)}
-      >
-        <AlertDialogContent
-          className="glass-strong border-white/10 text-twt-text"
-          data-testid="delete-stop-dialog"
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-display text-3xl">
-              Delete this stop?
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-twt-muted">
-              {pendingStopDelete
-                ? `"${pendingStopDelete.title}" and all its attractions will be gone. This can't be undone.`
-                : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              className="bg-transparent border-white/10 text-twt-text hover:bg-white/5"
-              data-testid="delete-stop-cancel"
-            >
-              Keep it
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDeleteStop}
-              className="bg-twt-rose hover:bg-twt-rose/90 text-white"
-              data-testid="delete-stop-confirm"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Delete attraction dialog */}
-      <AlertDialog
+        onConfirm={confirmDeleteStop}
+        testId="delete-stop-dialog"
+        title="Delete this stop?"
+        description={
+          pendingStopDelete
+            ? `"${pendingStopDelete.title}" and all its attractions & hotels will be gone. This can't be undone.`
+            : ""
+        }
+      />
+      <ConfirmDeleteDialog
         open={!!pendingAttrDelete}
         onOpenChange={(v) => !v && setPendingAttrDelete(null)}
-      >
-        <AlertDialogContent
-          className="glass-strong border-white/10 text-twt-text"
-          data-testid="delete-attr-dialog"
-        >
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-display text-3xl">
-              Delete this attraction?
-            </AlertDialogTitle>
-            <AlertDialogDescription className="text-twt-muted">
-              {pendingAttrDelete
-                ? `"${pendingAttrDelete.name}" will be permanently removed.`
-                : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              className="bg-transparent border-white/10 text-twt-text hover:bg-white/5"
-              data-testid="delete-attr-cancel"
-            >
-              Keep it
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmDeleteAttraction}
-              className="bg-twt-rose hover:bg-twt-rose/90 text-white"
-              data-testid="delete-attr-confirm"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        onConfirm={confirmDeleteAttraction}
+        testId="delete-attr-dialog"
+        title="Delete this attraction?"
+        description={
+          pendingAttrDelete ? `"${pendingAttrDelete.name}" will be permanently removed.` : ""
+        }
+      />
+      <ConfirmDeleteDialog
+        open={!!pendingHotelDelete}
+        onOpenChange={(v) => !v && setPendingHotelDelete(null)}
+        onConfirm={confirmDeleteHotel}
+        testId="delete-hotel-dialog"
+        title="Delete this hotel?"
+        description={
+          pendingHotelDelete ? `"${pendingHotelDelete.name}" will be permanently removed.` : ""
+        }
+      />
+      <ConfirmDeleteDialog
+        open={!!pendingExpDelete}
+        onOpenChange={(v) => !v && setPendingExpDelete(null)}
+        onConfirm={confirmDeleteExpense}
+        testId="delete-expense-dialog"
+        title="Delete this cost?"
+        description={
+          pendingExpDelete ? `"${pendingExpDelete.label}" will be permanently removed.` : ""
+        }
+      />
     </div>
   );
 }
@@ -553,9 +517,7 @@ function KmChip({ km, transport }) {
       <span className="w-1.5 h-1.5 rounded-full bg-twt-teal/60" />
       <span className="glass rounded-full px-2.5 py-1 inline-flex items-center gap-1.5">
         <Icon className="w-3 h-3 text-twt-teal" />
-        <span className="tabular-nums">
-          {km != null ? `${km} km` : "— km"}
-        </span>
+        <span className="tabular-nums">{km != null ? `${km} km` : "— km"}</span>
       </span>
     </div>
   );
@@ -574,8 +536,7 @@ function EmptyStops({ editable, onCreate }) {
         aria-hidden
         className="absolute inset-0 opacity-60"
         style={{
-          background:
-            "radial-gradient(ellipse at 50% 0%, rgba(94,234,212,0.12), transparent 60%)",
+          background: "radial-gradient(ellipse at 50% 0%, rgba(94,234,212,0.12), transparent 60%)",
         }}
       />
       <div className="relative">
