@@ -16,6 +16,7 @@ import {
   Route,
   RefreshCw,
   Lock,
+  List,
 } from "lucide-react";
 import { DndContext, closestCorners, DragOverlay } from "@dnd-kit/core";
 
@@ -37,6 +38,8 @@ import useTripSync from "@/hooks/useTripSync";
 import useTripPresence from "@/hooks/useTripPresence";
 
 const TripMap = lazy(() => import("@/components/trip/TripMap"));
+const TripDayView = lazy(() => import("@/components/trip/TripDayView"));
+import ManageStopsDialog from "@/components/trip/ManageStopsDialog";
 
 import { api } from "@/lib/api";
 import { canEdit as canEditRole } from "@/lib/permissions";
@@ -85,6 +88,7 @@ export default function Trip() {
   const [ratesOpen, setRatesOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [editTripOpen, setEditTripOpen] = useState(false);
+  const [manageStopsOpen, setManageStopsOpen] = useState(false);
   const [pendingStopDelete, setPendingStopDelete] = useState(null);
   const [pendingAttrDelete, setPendingAttrDelete] = useState(null);
   const [pendingHotelDelete, setPendingHotelDelete] = useState(null);
@@ -337,23 +341,23 @@ export default function Trip() {
       <Header />
 
       <div className="sticky top-16 z-30 backdrop-blur-xl bg-[#08090C]/70 border-b border-white/[0.06]">
-        <div className="max-w-4xl mx-auto px-6 py-4 flex items-center gap-4">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center gap-x-3 gap-y-2">
           <Link
             to="/dashboard"
-            className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-text transition"
+            className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-text transition shrink-0"
             data-testid="back-to-dashboard-link"
             aria-label="Back to dashboard"
           >
             <ArrowLeft className="w-4 h-4" />
           </Link>
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 order-2 sm:order-none basis-full sm:basis-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-display text-2xl leading-none truncate" data-testid="trip-title">
+              <h1 className="text-display text-xl sm:text-2xl leading-none truncate max-w-[70%] sm:max-w-none" data-testid="trip-title">
                 {trip.title}
               </h1>
               {trip.has_return && trip.home_location && (
                 <span
-                  className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest px-2 py-1 rounded-full glass border border-twt-teal/25 text-twt-teal"
+                  className="inline-flex items-center gap-1 text-[10px] uppercase tracking-widest px-2 py-1 rounded-full glass border border-twt-teal/25 text-twt-teal shrink-0"
                   data-testid="trip-back-home-chip"
                   title={`Return home to ${trip.home_location}`}
                 >
@@ -361,52 +365,67 @@ export default function Trip() {
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3 text-xs text-twt-muted mt-1">
-              <span className="inline-flex items-center gap-1.5">
-                <CalendarDays className="w-3 h-3" /> {fmtLongDate(trip.start_date)} →{" "}
+            <div className="flex items-center gap-3 text-[11px] sm:text-xs text-twt-muted mt-1">
+              <span className="inline-flex items-center gap-1.5 truncate">
+                <CalendarDays className="w-3 h-3 shrink-0" /> {fmtLongDate(trip.start_date)} →{" "}
                 {fmtLongDate(trip.end_date)}
               </span>
             </div>
           </div>
           <span
-            className={`text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-full border ${
+            className={`text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-full border shrink-0 ${
               ROLE_STYLES[trip.role] || ROLE_STYLES.viewer
             }`}
             data-testid="trip-role-badge"
           >
             {trip.role}
           </span>
-          <TripTotals summary={summary} onOpenRates={() => setRatesOpen(true)} />
-          <PresencePod presence={presence} meId={me?.user_id} />
-          {isOwner && (
+          <div className="hidden md:contents">
+            <TripTotals summary={summary} onOpenRates={() => setRatesOpen(true)} />
+            <PresencePod presence={presence} meId={me?.user_id} />
+          </div>
+          <div className="flex items-center gap-1 ml-auto shrink-0">
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setEditTripOpen(true)}
+                className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
+                data-testid="edit-trip-btn"
+                aria-label="Edit trip"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setEditTripOpen(true)}
+              onClick={() => setMembersOpen(true)}
               className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
-              data-testid="edit-trip-btn"
-              aria-label="Edit trip"
+              data-testid="members-open-btn"
+              aria-label="Collaborators"
             >
-              <Pencil className="w-4 h-4" />
+              <Users className="w-4 h-4" />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setMembersOpen(true)}
-            className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
-            data-testid="members-open-btn"
-            aria-label="Collaborators"
-          >
-            <Users className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setRatesOpen(true)}
-            className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
-            data-testid="rates-open-btn"
-            aria-label="Exchange rates"
-          >
-            <Coins className="w-4 h-4" />
-          </button>
+            <button
+              type="button"
+              onClick={() => setRatesOpen(true)}
+              className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
+              data-testid="rates-open-btn"
+              aria-label="Exchange rates"
+            >
+              <Coins className="w-4 h-4" />
+            </button>
+            {editable && (
+              <button
+                type="button"
+                onClick={() => setManageStopsOpen(true)}
+                className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
+                data-testid="manage-stops-open-btn"
+                aria-label="Manage stops"
+              >
+                <List className="w-4 h-4" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -416,6 +435,53 @@ export default function Trip() {
             <TripMap tripId={trip_id} syncVersion={trip?.version || 0} />
           </Suspense>
         )}
+        {stops.length === 0 ? (
+          <EmptyStops editable={editable} onCreate={() => setStopModal({ open: true, editing: null })} />
+        ) : (
+          <Suspense fallback={<div className="h-64 rounded-2xl glass animate-pulse" />}>
+            <TripDayView
+              trip={trip}
+              stops={stops}
+              attractions={Object.values(attractionsByStop).flat()}
+              hotels={Object.values(hotelsByStop).flat()}
+              expenses={expenses}
+              canEdit={editable}
+              onScheduled={() => loadAll()}
+              onAddAttractionForDay={(stopId, dayIso) =>
+                setAttractionModal({
+                  open: true,
+                  stopId,
+                  editing: null,
+                  defaultDate: dayIso,
+                })
+              }
+              onEditAttraction={(attr) =>
+                setAttractionModal({ open: true, stopId: attr.stop_id, editing: attr })
+              }
+              onDeleteAttraction={(attr) => setPendingAttrDelete(attr)}
+              onAddHotel={(stopId) =>
+                setHotelModal({ open: true, stopId, editing: null })
+              }
+              onEditHotel={(hotel) =>
+                setHotelModal({ open: true, stopId: hotel.stop_id, editing: hotel })
+              }
+              onDeleteHotel={(hotel) => setPendingHotelDelete(hotel)}
+              onAddExpense={(dayIso, stopId) =>
+                setExpenseModal({
+                  open: true,
+                  editing: null,
+                  defaultDate: dayIso,
+                  defaultStopId: stopId,
+                })
+              }
+              onEditExpense={(e) => setExpenseModal({ open: true, editing: e })}
+              onDeleteExpense={(e) => setPendingExpDelete(e)}
+            />
+          </Suspense>
+        )}
+      </main>
+
+      <ManageStopsDialog open={manageStopsOpen} onOpenChange={setManageStopsOpen}>
         {stops.length === 0 ? (
           <EmptyStops editable={editable} onCreate={() => setStopModal({ open: true, editing: null })} />
         ) : (
@@ -469,8 +535,8 @@ export default function Trip() {
           </DndContext>
         )}
 
-        {editable && stops.length > 0 && (
-          <div className="mt-10 flex justify-center">
+        {editable && (
+          <div className="mt-8 flex justify-center">
             <motion.button
               whileHover={{ y: -1 }}
               whileTap={{ y: 0 }}
@@ -483,16 +549,7 @@ export default function Trip() {
             </motion.button>
           </div>
         )}
-
-        <ExpensesSection
-          expenses={expenses}
-          stopsById={stopsById}
-          canEdit={editable}
-          onAdd={() => setExpenseModal({ open: true, editing: null })}
-          onEdit={(e) => setExpenseModal({ open: true, editing: e })}
-          onDelete={(e) => setPendingExpDelete(e)}
-        />
-      </main>
+      </ManageStopsDialog>
 
       <StopModal
         open={stopModal.open}
@@ -509,6 +566,7 @@ export default function Trip() {
         stopId={attractionModal.stopId}
         trip={trip}
         editingAttraction={attractionModal.editing}
+        defaultDate={attractionModal.defaultDate || null}
         onSaved={handleAttractionSaved}
       />
       <HotelModal
@@ -528,6 +586,8 @@ export default function Trip() {
         stops={stops}
         members={members}
         editingExpense={expenseModal.editing}
+        defaultDate={expenseModal.defaultDate || null}
+        defaultStopId={expenseModal.defaultStopId || null}
         onSaved={handleExpenseSaved}
       />
       <ExchangeRatesDialog

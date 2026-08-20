@@ -1,0 +1,43 @@
+{
+ "email": "sprintc_ui@twt.app",
+ "session_token": "dev_d9df4581baff4aaf",
+ "trip_id": "trip_e08c7a9c07704e9f",
+ "start": "2026-08-19",
+ "end": "2026-08-28",
+ "days": [
+  "2026-08-19",
+  "2026-08-20",
+  "2026-08-21",
+  "2026-08-22",
+  "2026-08-23",
+  "2026-08-24",
+  "2026-08-25",
+  "2026-08-26",
+  "2026-08-27",
+  "2026-08-28"
+ ],
+ "transit_day": "2026-08-23",
+ "today": "2026-08-20",
+ "stops": {
+  "roma": "stop_e417ceb661cd4fc7",
+  "milano": "stop_0a88ad4828114bd2",
+  "firenze": "stop_deb39ca956404f2f"
+ },
+ "attractions": {
+  "scheduled": "att_f3bfb81ddf2446fa",
+  "unsched": [
+   "att_8ff9d3cb3a474944",
+   "att_b2e447220fb64085",
+   "att_3b135a322754431b",
+   "att_ad68c66f34a940c7",
+   "att_bb53dbc2c9c64c94",
+   "att_132aaedfd3e3463d",
+   "att_f5f9a8f89cf3419c",
+   "att_940cbf9a74744747",
+   "att_1f159e4343374898",
+   "att_dff7efa56c7b4e33",
+   "att_fa06795d0305456c",
+   "att_5b1c5fe679ab4b76"
+  ]
+ }
+}

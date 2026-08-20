@@ -156,3 +156,18 @@ Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) 
 - **Backend**: Expense adds mandatory `expense_date: date`. POST defaults to today (or trip.start_date if today out of range); PATCH validates range 422. List sorted by expense_date DESC, created_at DESC. Backfill script `scripts/backfill_expense_date.py` (26 legacy expenses updated, rerun 0 = idempotent). PATCH explicitly rejects `expense_date=null` (422).
 - **Frontend**: ExpenseModal adds date input with min/max=trip range, default = clamp(today, trip range). Form has `noValidate` so app-level range error `Date must be within trip range (X → Y)` renders even when native constraint validation would block. ExpensesSection sorts client-side by expense_date desc + shows date cell with icon.
 - **Testing**: 19/19 new backend tests + regression on 14+ prior suites. Frontend Playwright verified all UI flows; 3 defects flagged by tester and fixed same-iteration: EditTripModal sync-reset guard (only reset on open transition or trip.trip_id change), ExpenseModal noValidate, PATCH null rejection.
+
+## Sprint C — Day-centric Tabs (Feb 2026)
+### Backend
+- `attractions.scheduled_date: date | None` optional, validated within stop range on POST/PATCH (422 with clear message).
+- New `PATCH /api/trips/{id}/attractions/{aid}/schedule` body `{scheduled_date?, target_stop_id?, new_order?}`: derives stop_id from date when target omitted, 422 for uncovered dates, renormalises order in source+target stops.
+- `AttractionMove` reorder now supports optional `scheduled_date` per move with the same validation.
+- New `GET /api/trips/{id}/timeline` returns `days:[{date, weekday, day_index, stop_id, stop_title, stop_position (first|middle|last|only|none), is_transit_day, is_return_home_day, route_in, attractions[], hotels_active[], expenses[]}]` + `unscheduled_attractions` (with `stop_title`) + `return_leg`. 4 batched find() via asyncio.gather; perf 0.25-0.4s for 30-day/100-attraction trips (target <1s).
+### Frontend
+- New primary Trip view = day-tabs (`TripDayView` / `DayTabsList` / `DayContent` / `UnscheduledDrawer`) replacing the stops timeline. StopHeaderCard for first/last/only (Arrival/Departure/Start & Destination), LocationBanner for middle days, TransitCard for none, ReturnHomeCard on last day when has_return.
+- Old stops CRUD moved into `ManageStopsDialog` behind a `List` icon in the sub-header. Old timeline components (StopCard/HotelList/AttractionItem) preserved and reused inside the dialog.
+- `AttractionModal` gains `scheduled_date` input; `ExpenseModal` accepts `defaultDate` + `defaultStopId` and pre-fills them from the active day.
+- DnD hardening (post iter22/23): `DndContext autoScroll={false}` + `MeasuringStrategy.Always` + `pointerWithin`-only detector (fail-closed → no-op on off-target drops). Transit-day drop pills render as disabled (`day-drop-disabled-<iso>`) so users can't attempt an impossible drop.
+- Sub-header mobile fix: `flex flex-wrap`, title block `order-2 sm:order-none basis-full sm:basis-0`, TripTotals + PresencePod hidden `<md`, icons grouped in one `ml-auto` cluster. Title font `text-xl sm:text-2xl`.
+### Testing
+- New `sprint_c_test.py` 27/27 + regression 53/53 (sprint_ab + trip_map + trip_summary + orphan). 12/12 correct-day drops verified in Playwright across first/middle/last/near-edge and pre-scrolled viewports; no-op cases (empty target, transit-day) verified 0 PATCH.

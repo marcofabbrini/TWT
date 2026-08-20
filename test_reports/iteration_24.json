@@ -1,0 +1,33 @@
+{
+  "summary": "Sprint C DnD hardening retest (iteration_23 fixes verified). BACKEND: sprint_c_test.py 27/27 PASS; regression sprint_ab + trip_map + trip_summary + orphan_expenses + orphan_cascade_iter20/21 = 53/53 PASS (identical to iteration_23). FRONTEND DnD: 12/12 drag attempts landed on EXACTLY the targeted day — zero wrong-day drops. Round 1 (1440x900, scrollY 0): 8 pill targets (first day 08-19, 08-20, 08-21, 08-22, 08-24, 08-25, 08-26, last day 08-28) all resolved correctly (aria-live announcement matched, exactly 1 PATCH each, GET /api/trips/{id}/timeline confirmed the iso). Round 2 (1280x720, page pre-scrolled to 150/300/600/max-40 so the drop strip sat near the top and bottom viewport edges, incl. pointer at y=708 of a 720px viewport): 4/4 correct; no autoScroll drift was observed at the moment of drop for the edge cases (drift 0), and the two drags with a 56px scroll delta (caused by scroll_into_view before drag, not mid-drag) still landed on the correct pill. NO-OP CASES: (a) drop with pointer over no pill (40,860 — 0 pills under pointer) => 0 PATCH requests, attraction stayed unscheduled; (b) transit day pill is rendered as [data-testid=day-drop-disabled-2026-08-23] with computed cursor 'not-allowed', aria-live said 'is no longer over a droppable area', drop => 0 PATCH, attraction stayed unscheduled. REGRESSIONS: mobile 390x844 sub-header still clean (docW==winW==390, title 'SPRINTC_UI Day tabs' not truncated scrollWidth==clientWidth==202, 20px font, BACK HOME chip inline, OWNER badge + 4 icons in the top band). Modal prefill: attr-date-input and expense-date-input both prefill 2026-08-22 from the selected day tab. No error elements and no console errors (other than the expected pre-login 401 on /api/auth/me).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/trips/{id}/attractions/unscheduled", "issue": "Returned HTTP 200 with an empty array while the UI drawer correctly showed 4 unscheduled attractions. Likely not a real route (or it filters differently); harmless for the app but confusing for API consumers/tests — worth confirming the canonical endpoint for unscheduled attractions."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/sprint_c_test.py",
+    "/app/test_reports/pytest/sprint_c_iter24.xml",
+    "/app/test_reports/pytest/regression_iter24.xml",
+    "/app/test_reports/seed_ui_sprintc_iter24.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "TripDayView.jsx: DragOverlay is still imported but never rendered — dead import (cosmetic, harmless now that the detector is pointerWithin-only).",
+    "With autoScroll={false} the user cannot scroll while dragging; if the drop strip ever renders outside the viewport (very short viewports / long map card) the target becomes unreachable. Not reproducible at 1280x720 or 1440x900 (the strip is sticky/near the tabs and stayed reachable in all 12 drags), but a container-level scroll or keeping the strip position:sticky would be a safer long-term guard."
+  ],
+  "updated_files": ["/app/test_reports/seed_ui_sprintc_iter24.py"],
+  "success_rate": {"backend": "100% (27/27 sprint_c + 53/53 regression)", "frontend": "100% (12/12 correct-day drops, 2/2 no-op cases, mobile header + modal prefill PASS)"},
+  "seed_data_creation": "Created /app/test_reports/seed_ui_sprintc_iter24.py (same shape as seed_ui_sprintc.py but with 12 unscheduled attractions so 8+ drags can run without re-seeding). Trip: SPRINTC_UI Day tabs, 2026-08-19 -> 2026-08-28, Roma(08-19..08-22)/transit 08-23/Milano 08-24/Firenze 08-25..08-28, owner sprintc_ui@twt.app. Writes /app/test_reports/sprintc_ui_seed.json.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "dev-login: POST /api/auth/dev-login {\"email\":\"sprintc_ui@twt.app\"} (ENV=dev). In browser: page.evaluate fetch('/api/auth/dev-login', {credentials:'include'}) then goto /trip/<id>.",
+  "context_for_next_testing_agent": "DnD defect from iteration_22/23 is FIXED and verified with 12 drags across first/middle/last/near-edge days plus scrolled viewports; pointerWithin-only + autoScroll={false} + MeasuringStrategy.Always behaves fail-closed as intended. Reliable assertion pattern: probe the pill getBoundingClientRect + window.scrollY just before mouse.up, read dnd-kit aria-live text, count PATCH requests via page.on('request'), then verify with GET /api/trips/{id}/timeline. Use /app/test_reports/seed_ui_sprintc_iter24.py for 12 fresh unscheduled attractions (each successful drag consumes one). phase5* legacy suites NOT run (ORS_MOCK=0, known/out of scope). Mobile FAB '2 unscheduled' overlapping the day-tabs strip at 390x844 remains (explicitly out of scope).",
+  "rca_of_the_issue": "No new issues. Previous root cause (dnd-kit window auto-scroll moving the drop-pill strip out from under a stationary pointer, then the rectIntersection/closestCenter fallback resolving against the dragged card in the drawer and landing ~2 pills right) is resolved by autoScroll={false} + MeasuringStrategy.Always + pointerWithin-only collision detection; measured scroll drift at drop time was 0 for all edge-case drags and every drop whose pointer was inside a pill rect scheduled exactly that iso."
+}

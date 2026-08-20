@@ -31,6 +31,7 @@ const empty = {
   currency: "EUR",
   booking_link: "",
   scheduled_time: "",
+  scheduled_date: "",
   duration_min: "",
   notes: "",
 };
@@ -42,6 +43,7 @@ export default function AttractionModal({
   stopId,
   trip,
   editingAttraction,
+  defaultDate,
   onSaved,
 }) {
   const [form, setForm] = useState(empty);
@@ -60,6 +62,7 @@ export default function AttractionModal({
         currency: editingAttraction.currency || trip?.home_currency || "EUR",
         booking_link: editingAttraction.booking_link || "",
         scheduled_time: editingAttraction.scheduled_time || "",
+        scheduled_date: editingAttraction.scheduled_date || "",
         duration_min:
           editingAttraction.duration_min === null ||
           editingAttraction.duration_min === undefined
@@ -68,10 +71,15 @@ export default function AttractionModal({
         notes: editingAttraction.notes || "",
       });
     } else {
-      setForm({ ...empty, currency: trip?.home_currency || "EUR" });
+      setForm({
+        ...empty,
+        currency: trip?.home_currency || "EUR",
+        scheduled_date: defaultDate || "",
+      });
     }
     setError("");
-  }, [open, editingAttraction, trip]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editingAttraction?.attraction_id]);
 
   const update = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -86,6 +94,7 @@ export default function AttractionModal({
       currency: form.currency,
       booking_link: form.booking_link.trim() || null,
       scheduled_time: form.scheduled_time || null,
+      scheduled_date: form.scheduled_date || null,
       duration_min: form.duration_min === "" ? null : Number(form.duration_min),
       notes: form.notes || null,
     };
@@ -192,6 +201,21 @@ export default function AttractionModal({
               className="bg-white/[0.03] border-white/10 focus-visible:ring-twt-teal/40"
               data-testid="attr-link-input"
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-twt-muted text-xs uppercase tracking-widest">
+              Scheduled date <span className="normal-case tracking-normal text-twt-muted/70">· optional</span>
+            </Label>
+            <Input
+              type="date"
+              value={form.scheduled_date}
+              onChange={(e) => update("scheduled_date", e.target.value)}
+              className="bg-white/[0.03] border-white/10 focus-visible:ring-twt-teal/40 [color-scheme:dark]"
+              data-testid="attr-date-input"
+            />
+            <div className="text-[11px] text-twt-muted">
+              Leave empty to keep this attraction unscheduled.
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">

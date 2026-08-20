@@ -1,0 +1,50 @@
+{
+  "summary": "Sprint C (day-centric tabs) full-stack test. BACKEND: new suite /app/backend/tests/sprint_c_test.py = 27/27 PASS covering GET /timeline (positions first/middle/last/only/none, transit day, route_in on arrival days with from_stop_id/from_title/transport_mode/distance_m, return_home_day + return_leg, hotels_active night semantics, expenses-by-day, unscheduled_attractions w/ stop_title, no _id leak, perf), scheduled_date validation on POST/PATCH attractions (422 message text asserted), PATCH /attractions/{id}/schedule cases a-e + 404, /attractions/reorder backward-compat and scheduled_date carry-through with atomic 422. Perf: 30-day trip / 100 attractions timeline responded in ~0.25-0.4s (<1s target met). REGRESSION: sprint_ab_test.py + trip_map_test.py + trip_summary_test.py + orphan_expenses + orphan_cascade_iter20/21 = 53/53 PASS. FRONTEND: seeded 10-day trip (Roma d0-d3, transit gap, single-day Milano, Firenze d6-d9 w/ has_return) and verified day-tabs-list (10 tabs, weekday+M/D labels, transport dots only on boundary days, gold today dot, auto-select+auto-scroll to today, data-active), scroll arrows present (>7 days) and functional, DayContent per position (stop header card ARRIVAL/DEPARTURE/START & DESTINATION, location banner, transit card, return-home card, route-in), per-day attractions/expenses/hotels_active filtering, UnscheduledDrawer (count badge + grouped by stop), drag&drop -> PATCH /schedule (auto-derives stop, drawer count updates live, no refresh needed), AttractionModal attr-date-input prefill + successful create landing on the right day, ExpenseModal expense-date-input + stop prefill, ManageStopsDialog opens with stops list + add-stop-btn. One reproducible UX defect found in drag&drop target resolution and one mobile header layout defect.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/trips/{id}/timeline", "issue": "db.exchange_rates is fetched in the asyncio.gather batch but the result ('rates') is never used — one wasted round-trip per timeline call. Also unused imports (datetime) and unused logger in timeline.py."},
+      {"endpoint": "POST /api/trips/{id}/attractions/reorder", "issue": "Dead code: 'target_stop = next((s for s in stops ...))' (attractions.py ~line 409) is assigned but never used; the validation re-queries db.stops for the full doc instead. Minor cleanup + one avoidable query per dated move."},
+      {"endpoint": "POST /api/trips/{id}/stops/{sid}/attractions", "issue": "_get_stop_or_404(trip_id, stop_id) is called twice in create_attraction (once at the top, again before scheduled_date validation) — duplicate query."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TripDayView (DndContext)", "issue": "Drag&drop schedules the WRONG day, reproducibly. collisionDetection={closestCenter} resolves collisions against the dragged item's rect centre, not the pointer. Because the drag handle sits at the far left of a ~265px wide card rendered in the right-side drawer, the overlay centre is ~115px right of the cursor, so a drop lands ~2 tabs to the right of the pill under the cursor. Verified twice: cursor on day-drop-2026-08-25 -> scheduled 2026-08-27; cursor on day-drop-2026-08-23 (transit day) -> dnd-kit announced 'dropped over droppable area day-drop-2026-08-25' and the API scheduled 2026-08-25. Fix: use pointerWithin (with closestCenter as fallback) or a pointer-based custom collision detector.", "selector": "[data-testid^=day-drop-]", "priority": "HIGH"},
+      {"component": "Trip page sub-header (mobile 390px)", "issue": "Header is broken on mobile: trip title truncates to 'S..', the 'BACK HOME' pill overlaps/pushes the date row, the date range wraps into 3 lines with a stray arrow, and the OWNER badge + icon row (incl. manage-stops-open-btn) collides with the title block. No horizontal page overflow, purely intra-header layout.", "selector": "[data-testid=manage-stops-open-btn] area", "priority": "MEDIUM"},
+      {"component": "UnscheduledDrawer (mobile)", "issue": "The floating 'N unscheduled' button sits directly on top of the sticky day-tabs strip at 390px width, partially covering 2 tabs.", "selector": "[data-testid=unscheduled-drawer-toggle]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AttractionModal / ExpenseModal", "issues": ["Both date fields use the native browser date input (mm/dd/yyyy + native picker) instead of the shadcn Calendar component — inconsistent with the rest of the dark UI (pre-existing pattern from Sprint B, flagged for consistency only)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/sprint_c_test.py",
+    "/app/test_reports/pytest/sprint_c.xml",
+    "/app/test_reports/seed_ui_sprintc.py",
+    "/app/test_reports/sprintc_ui_seed.json"
+  ],
+  "action_items": [
+    "Replace closestCenter with pointerWithin (or a pointer-based collision detector) in TripDayView's DndContext so drops land on the day under the cursor.",
+    "Fix Trip sub-header layout at <=390px (title truncation, BACK HOME pill overlap, wrapped date range).",
+    "Optional: offset the unscheduled drawer FAB above the sticky tabs on mobile.",
+    "Cleanup: drop the unused exchange_rates query/imports in timeline.py, the dead target_stop var and duplicate stop lookups in attractions.py."
+  ],
+  "critical_code_review_comments": [
+    "timeline.py builds the whole day array in Python from full collection scans per trip (find without projections, to_list(5000)); fine at current scale (measured 0.25-0.4s for 30 days/100 attractions) but add indexes on {trip_id} for attractions/expenses/hotels if not present.",
+    "PATCH /attractions/{id} validates scheduled_date only against the attraction's CURRENT stop, so cross-stop rescheduling must go through /schedule — make sure the frontend AttractionModal never lets a user pick a date outside the current stop (it currently opens from the day tab so it is safe, but editing an existing attraction and changing the date to another stop's day will 422)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/sprint_c_test.py",
+    "/app/frontend/src/components/trip/DayTabsList.jsx",
+    "/app/test_reports/seed_ui_sprintc.py"
+  ],
+  "success_rate": {"backend": "100% (27/27 new + 53/53 regression)", "frontend": "~90% (all flows work; drag&drop lands on wrong day)"},
+  "seed_data_creation": "sprintc_be@twt.app trips created+deleted by the pytest suite. UI seed: sprintc_ui@twt.app trip 'SPRINTC_UI Day tabs' (trip_adf4346b956b4ba2, 2026-08-19 -> 2026-08-28, stops Roma/Milano/Firenze, 1 hotel, 1 expense, attractions Colosseo/Duomo/2 formerly-unscheduled now scheduled). Regenerate anytime with `python /app/test_reports/seed_ui_sprintc.py`.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "dev-login: POST /api/auth/dev-login {email} — sprintc_be@twt.app (backend), sprintc_ui@twt.app (UI seed owner)",
+  "context_for_next_testing_agent": "Backend Sprint C is fully green — rerun `pytest tests/sprint_c_test.py` (27 tests) as regression. Frontend: only the dnd collision-detection fix needs retesting; re-run the drag test by opening [data-testid=unscheduled-drawer-toggle], mouse-down on [data-testid=attr-drag-<id>], moving to [data-testid=day-drop-<iso>], and asserting the resulting scheduled_date == that iso (dnd-kit's aria live region text 'dropped over droppable area day-drop-<iso>' is a handy assertion source). Note: the UI seed's unscheduled attractions were consumed by the drag tests — re-run the seed script to get 2 unscheduled items back. phase5* legacy suites still fail due to ORS_MOCK=0 (known, not retested).",
+  "rca_of_the_issue": "Drag&drop mis-target RCA: dnd-kit's closestCenter measures the distance between each droppable rect centre and the DRAGGED NODE's rect centre. The drag handle is a small grip at the left edge of a 265px-wide attraction card inside the right-hand drawer, so the pointer is ~115px left of the card centre; closestCenter therefore selects the drop pill nearest to (pointer + 115px), i.e. two pills to the right. pointerWithin/pointer-based collision removes the offset."
+}

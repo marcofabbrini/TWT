@@ -1,9 +1,10 @@
 """Attractions routes (Phase 2)."""
 import logging
-from datetime import datetime
-from typing import List
+from datetime import datetime, date
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from pymongo import UpdateOne, ASCENDING
 
 from db import db
@@ -27,12 +28,66 @@ stop_router = APIRouter(prefix="/trips/{trip_id}/stops/{stop_id}/attractions", t
 trip_router = APIRouter(prefix="/trips/{trip_id}", tags=["attractions"])
 
 
+def _to_date(v) -> Optional[date]:
+    if v is None:
+        return None
+    if isinstance(v, date):
+        return v
+    if isinstance(v, str):
+        return date.fromisoformat(v[:10])
+    return None
+
+
+async def _resolve_stop_for_date(trip_id: str, when: date) -> Optional[dict]:
+    """Return the stop that best covers `when`. If multiple overlap, prefer the
+    one with the largest start_date (the most-recently entered one).
+    """
+    stops = await db.stops.find(
+        {"trip_id": trip_id},
+        {"_id": 0, "stop_id": 1, "start_date": 1, "end_date": 1, "order": 1, "title": 1},
+    ).to_list(2000)
+    best = None
+    best_start = None
+    for s in stops:
+        sd = _to_date(s.get("start_date"))
+        ed = _to_date(s.get("end_date"))
+        if sd is None or ed is None:
+            continue
+        if sd <= when <= ed:
+            if best_start is None or sd > best_start:
+                best = s
+                best_start = sd
+    return best
+
+
+def _validate_scheduled_date_against_stop(stop: dict, when: Optional[date]) -> None:
+    if when is None:
+        return
+    sd = _to_date(stop.get("start_date"))
+    ed = _to_date(stop.get("end_date"))
+    if sd is None or ed is None:
+        return
+    if when < sd or when > ed:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"scheduled_date must be within stop range "
+                f"({sd.isoformat()} → {ed.isoformat()})"
+            ),
+        )
+
+
 def _serialize(doc: dict) -> dict:
     out = {k: v for k, v in doc.items() if k != "_id"}
     for k in ("created_at", "updated_at"):
         v = out.get(k)
         if isinstance(v, str):
             out[k] = datetime.fromisoformat(v)
+    v = out.get("scheduled_date")
+    if isinstance(v, str):
+        out["scheduled_date"] = date.fromisoformat(v[:10])
+    elif isinstance(v, datetime):
+        out["scheduled_date"] = v.date()
     return out
 
 
@@ -100,6 +155,10 @@ async def create_attraction(
 
     currency = body.currency or trip["home_currency"]
 
+    # Validate scheduled_date (if provided) is within THIS stop's range.
+    stop_doc = await _get_stop_or_404(trip_id, stop_id)
+    _validate_scheduled_date_against_stop(stop_doc, body.scheduled_date)
+
     last = await db.attractions.find(
         {"trip_id": trip_id, "stop_id": stop_id}, {"order": 1}
     ).sort("order", -1).limit(1).to_list(1)
@@ -115,6 +174,7 @@ async def create_attraction(
         "currency": currency,
         "booking_link": body.booking_link,
         "scheduled_time": body.scheduled_time,
+        "scheduled_date": body.scheduled_date.isoformat() if body.scheduled_date else None,
         "duration_min": body.duration_min,
         "notes": body.notes,
         "created_at": utcnow().isoformat(),
@@ -141,8 +201,97 @@ async def update_attraction(
         raise HTTPException(status_code=404, detail="Attraction not found")
 
     updates = body.model_dump(exclude_unset=True)
+    if "scheduled_date" in updates and updates["scheduled_date"] is not None:
+        # Validate against current stop's range.
+        stop_doc = await _get_stop_or_404(trip_id, att["stop_id"])
+        _validate_scheduled_date_against_stop(stop_doc, _to_date(updates["scheduled_date"]))
+        updates["scheduled_date"] = _to_date(updates["scheduled_date"]).isoformat()
     updates["updated_at"] = utcnow().isoformat()
     await db.attractions.update_one({"attraction_id": attraction_id}, {"$set": updates})
+    await bump_version(trip_id, current_user["user_id"])
+    doc = await db.attractions.find_one({"attraction_id": attraction_id}, {"_id": 0})
+    return Attraction(**_serialize(doc))
+
+
+# ────────────────────────────────────────────────────────────────
+# Day-centric schedule endpoint (Sprint C).
+# ────────────────────────────────────────────────────────────────
+class ScheduleBody(BaseModel):
+    """Body for PATCH .../attractions/{id}/schedule."""
+    scheduled_date: Optional[date] = None
+    target_stop_id: Optional[str] = None
+    new_order: Optional[int] = Field(default=None, ge=0)
+
+
+@trip_router.patch("/attractions/{attraction_id}/schedule", response_model=Attraction)
+async def schedule_attraction(
+    trip_id: str,
+    attraction_id: str,
+    body: ScheduleBody,
+    current_user: dict = Depends(require_auth),
+):
+    await require_role(trip_id, current_user["user_id"], "editor")
+    att = await db.attractions.find_one(
+        {"attraction_id": attraction_id, "trip_id": trip_id}, {"_id": 0}
+    )
+    if not att:
+        raise HTTPException(status_code=404, detail="Attraction not found")
+
+    # Resolve final (stop_id, scheduled_date).
+    when = body.scheduled_date  # may be None → means "unschedule"
+    new_stop_id: Optional[str] = None
+
+    if body.target_stop_id:
+        target_stop = await _get_stop_or_404(trip_id, body.target_stop_id)
+        _validate_scheduled_date_against_stop(target_stop, when)
+        new_stop_id = target_stop["stop_id"]
+    elif when is not None:
+        # Derive stop from date.
+        derived = await _resolve_stop_for_date(trip_id, when)
+        if not derived:
+            raise HTTPException(
+                status_code=422,
+                detail=f"No stop covers {when.isoformat()} — assign a target_stop_id or pick another date.",
+            )
+        new_stop_id = derived["stop_id"]
+    else:
+        # scheduled_date=null and no target_stop_id → just clear the date.
+        new_stop_id = att["stop_id"]
+
+    old_stop_id = att["stop_id"]
+    updates = {
+        "stop_id": new_stop_id,
+        "scheduled_date": when.isoformat() if when else None,
+        "updated_at": utcnow().isoformat(),
+    }
+
+    # If we're moving to a different stop, compute a natural order.
+    if new_stop_id != old_stop_id:
+        if body.new_order is not None:
+            updates["order"] = body.new_order
+        else:
+            # Append to the tail of the target stop.
+            last = await db.attractions.find(
+                {"trip_id": trip_id, "stop_id": new_stop_id},
+                {"order": 1},
+            ).sort("order", -1).limit(1).to_list(1)
+            updates["order"] = (last[0]["order"] + 1) if last else 0
+    elif body.new_order is not None:
+        updates["order"] = body.new_order
+
+    await db.attractions.update_one({"attraction_id": attraction_id}, {"$set": updates})
+
+    # Renormalize both source and target when the stop changed.
+    if new_stop_id != old_stop_id:
+        await _renormalize_stop_attractions(trip_id, old_stop_id)
+        await _renormalize_stop_attractions(
+            trip_id, new_stop_id, moved_ids={attraction_id}
+        )
+    elif body.new_order is not None:
+        await _renormalize_stop_attractions(
+            trip_id, new_stop_id, moved_ids={attraction_id}
+        )
+
     await bump_version(trip_id, current_user["user_id"])
     doc = await db.attractions.find_one({"attraction_id": attraction_id}, {"_id": 0})
     return Attraction(**_serialize(doc))
@@ -252,10 +401,34 @@ async def reorder_attractions(
         )
         for aid, sid, i in final_updates
     ]
+    # Optional per-move scheduled_date carry-through.
+    date_ops = []
+    for m in body.moves:
+        if "scheduled_date" not in m.model_fields_set:
+            continue
+        target_stop = next((s for s in stops if s["stop_id"] == m.target_stop_id), None)
+        if m.scheduled_date is not None:
+            # Validate against target stop.
+            full_stop = await db.stops.find_one(
+                {"trip_id": trip_id, "stop_id": m.target_stop_id},
+                {"_id": 0, "start_date": 1, "end_date": 1},
+            )
+            _validate_scheduled_date_against_stop(full_stop or {}, m.scheduled_date)
+        date_ops.append(
+            UpdateOne(
+                {"attraction_id": m.attraction_id, "trip_id": trip_id},
+                {"$set": {
+                    "scheduled_date": m.scheduled_date.isoformat() if m.scheduled_date else None,
+                    "updated_at": now_iso,
+                }},
+            )
+        )
     if ops:
         result = await db.attractions.bulk_write(ops, ordered=True)
         if result.matched_count != len(ops):
             raise HTTPException(status_code=500, detail="Partial reorder failure")
+    if date_ops:
+        await db.attractions.bulk_write(date_ops, ordered=False)
 
     await bump_version(trip_id, current_user["user_id"])
     docs = await db.attractions.find({"trip_id": trip_id}, {"_id": 0}).sort("order", ASCENDING).to_list(2000)

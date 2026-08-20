@@ -194,6 +194,7 @@ class AttractionBase(BaseModel):
     currency: Optional[str] = None
     booking_link: Optional[str] = Field(default=None, max_length=500)
     scheduled_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
+    scheduled_date: Optional[date] = None
     duration_min: Optional[int] = Field(default=None, ge=0)
     notes: Optional[str] = Field(default=None, max_length=2000)
 
@@ -229,6 +230,7 @@ class AttractionUpdate(BaseModel):
     currency: Optional[str] = None
     booking_link: Optional[str] = Field(default=None, max_length=500)
     scheduled_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
+    scheduled_date: Optional[date] = None
     duration_min: Optional[int] = Field(default=None, ge=0)
     notes: Optional[str] = Field(default=None, max_length=2000)
 
@@ -268,6 +270,7 @@ class AttractionMove(BaseModel):
     attraction_id: str
     target_stop_id: str
     new_order: int = Field(ge=0)
+    scheduled_date: Optional[date] = None
 
 
 class ReorderAttractions(BaseModel):

@@ -57,6 +57,8 @@ export default function ExpenseModal({
   stops,
   members = [],
   editingExpense,
+  defaultDate,
+  defaultStopId,
   onSaved,
 }) {
   const [form, setForm] = useState(empty);
@@ -87,7 +89,8 @@ export default function ExpenseModal({
       setForm({
         ...empty,
         currency: trip?.home_currency || "EUR",
-        expense_date: clampToTripRange(todayIso(), trip),
+        expense_date: clampToTripRange(defaultDate || todayIso(), trip),
+        stop_id: defaultStopId || "__none__",
         split_between: acceptedMembers.map((m) => m.user.user_id),
       });
     }

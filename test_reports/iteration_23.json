@@ -1,0 +1,40 @@
+{
+  "summary": "Sprint C follow-up retest (iteration_22 fixes). BACKEND: sprint_c_test.py 27/27 PASS after the timeline.py cleanup; regression sprint_ab_test.py + trip_map_test.py + trip_summary_test.py + orphan_expenses + orphan_cascade_iter20/21 = 53/53 PASS. FRONTEND: (1) Mobile sub-header at 390x844 is FIXED — title 'SPRINTC_UI Day tabs' fully rendered (scrollWidth==clientWidth, 20px font), '↩ BACK HOME' chip inline right of the title, date range on its own row, OWNER badge + 4 action icons on the top row inside the viewport, header inner height 110px, no horizontal overflow, no title/badge overlap. Desktop 1440 unchanged: header 117px, KM/Spend totals visible again, title+badge+icons in one band, no overflow, no truncation. (2) DnD collision fix is PARTIAL — the new compound detector IS shipped (verified 'pointerWithin' + the new comment inside static/js/src_components_trip_TripDayView_jsx.chunk.js) but wrong-day drops still reproduce ~40% of drags (3 clear failures out of 8): pointer on day-drop-2026-08-19 -> scheduled 2026-08-21; pointer on day-drop-2026-08-21 -> 2026-08-23 (twice); pointer on day-drop-2026-08-26 -> 2026-08-28. Root cause measured in-browser (see rca_of_the_issue): dnd-kit window auto-scroll moves the pill strip out from under the stationary pointer mid-drag (probe showed window.scrollY 0->45 and the target pill's y 836->791 while the pointer stayed at y=858), pointerWithin then returns [] and the compound detector falls through to rectIntersection/closestCenter, which is measured against the dragged card in the right-hand drawer (no DragOverlay is rendered) and therefore lands ~2 pills to the right — exactly the iteration_22 symptom. Passing drags were the ones where no scroll/layout shift happened during the drag. (3) Transit-day drop pill can never succeed: PATCH /attractions/{id}/schedule with a transit date returns 422 'No stop covers 2026-08-23 — assign a target_stop_id or pick another date.', yet TripDayView renders a 'Drop → 08-23' pill for it. BONUS: attr-date-input and expense-date-input both prefill 2026-08-22 from the selected day tab (PASS).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PATCH /api/trips/{id}/attractions/{aid}/schedule", "issue": "Transit days (no stop covering the date) return 422 by design, but the day-view exposes a drop target for them, so the UI offers an action that can never succeed. Either accept a derived/optional target_stop_id from the UI or the frontend must disable transit-day drop pills."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TripDayView (DndContext collision detection)", "issue": "Wrong-day drops still reproduce (~40% failure rate, 3/8 drags). The compound detector (pointerWithin > rectIntersection > closestCenter) is deployed, but dnd-kit's default window auto-scroll shifts the drop-pill strip up while the pointer stays still; once the pointer is outside every pill rect, pointerWithin returns [] and the rectIntersection/closestCenter fallback resolves against the translated dragged card (which sits in the right-side drawer, ~115px right of the cursor, and no DragOverlay is rendered), landing the drop ~2 day pills to the right. Measured evidence: pointer (1174,858) on day-drop-2026-08-26 -> announced/scheduled 2026-08-28, with window.scrollY 0->45 and pill y 836->791 during the drag.", "selector": "[data-testid^=day-drop-]", "priority": "HIGH"},
+      {"component": "TripDayView drop-pill strip", "issue": "A 'Drop → 08-23' pill is rendered for transit days; dropping there always fails with a 422 toast ('No stop covers 2026-08-23'). Disable/grey those pills (or pass a target_stop_id).", "selector": "[data-testid=day-drop-2026-08-23]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/sprint_c_test.py",
+    "/app/test_reports/pytest/sprint_c_iter23.xml",
+    "/app/test_reports/pytest/regression_iter23.xml",
+    "/app/test_reports/seed_ui_sprintc.py"
+  ],
+  "action_items": [
+    "Harden the DnD target resolution in TripDayView: (a) disable auto-scroll on the DndContext (autoScroll={false} or a restricted config) so the pill strip cannot move under the cursor, (b) set measuring={{droppable:{strategy: MeasuringStrategy.Always}}} so mid-drag layout shifts are re-measured, and (c) make the fallback pointer-safe — return [] (no-op drop) instead of rectIntersection/closestCenter, or render a <DragOverlay> so the collision rect is centred on the cursor. Any single one of (a)/(c) removes the ~2-pill offset.",
+    "Disable transit-day drop pills (or send target_stop_id) — the drop currently always 422s.",
+    "Optional cleanup: DragOverlay is imported in TripDayView but never rendered; DndContext is imported in DayContent.jsx but not used."
+  ],
+  "critical_code_review_comments": [
+    "The rectIntersection/closestCenter fallback in the compound collision detector defeats the purpose of the fix: whenever the pointer is not over a pill the drop silently schedules the WRONG day instead of being a no-op. Prefer failing closed.",
+    "Because no DragOverlay is rendered, the drag collision rect is the original card node inside the drawer, so any rect-based detector is inherently offset from the cursor by half the card width."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (27/27 sprint_c + 53/53 regression)", "frontend": "~60% (mobile+desktop header fixed; 3/8 drag targets still wrong)"},
+  "seed_data_creation": "Re-ran /app/test_reports/seed_ui_sprintc.py three times (drags consume the unscheduled attractions). Latest trip: trip_12c7a5e7605448fd (owner sprintc_ui@twt.app, 2026-08-19→2026-08-28, Roma/Milano/Firenze, transit day 08-23). Older seeded trips trip_14d55d60c6b248c2 and trip_dcb5e753b5664a03 also remain under the same account.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "dev-login: POST /api/auth/dev-login {\"email\":\"sprintc_ui@twt.app\"} (ENV=dev)",
+  "context_for_next_testing_agent": "Retest recipe for the drag defect: dev-login sprintc_ui@twt.app, open /trip/<seeded trip>, click [data-testid=unscheduled-drawer-toggle], mouse-down on [data-testid=attr-drag-<id>], move in steps to the centre of [data-testid=day-drop-<iso>], then BEFORE mouse-up probe window.scrollY and the pill's getBoundingClientRect().y — if the page auto-scrolled the pointer is no longer inside the pill and the drop lands 2 pills right. Assert via GET /api/trips/<id>/timeline. dnd-kit aria-live text ('was moved over droppable area day-drop-<iso>') matches the resolved target and is a reliable pre-drop assertion. Note each successful drag consumes an unscheduled attraction — re-run /app/test_reports/seed_ui_sprintc.py (creates a NEW trip each time). Header layout (mobile 390 + desktop 1440) is verified fixed, no need to retest unless Trip.jsx changes. phase5* legacy suites not run (ORS_MOCK=0, out of scope).",
+  "rca_of_the_issue": "TripDayView renders the day drop pills only during drag, inside a strip that participates in normal page layout, and does NOT render a DragOverlay. dnd-kit's default auto-scroll fires while dragging near viewport edges: measured window.scrollY 0 -> 45 mid-drag, moving the target pill from y=836 to y=791 while the pointer remained at y=858 (i.e. outside every pill rect). pointerWithin therefore returns an empty array and the compound detector falls through to rectIntersection/closestCenter, which compare the translated rect of the dragged card — the card lives in the right-side drawer and is ~115px wide-offset from the grip the cursor holds — so the nearest pill by rect is about two pills (2 x 85px) to the right of the intended day. Mitigation: disable auto-scroll, re-measure droppables continuously (MeasuringStrategy.Always), and make the fallback a no-op rather than a rect-based guess (or add a DragOverlay so the collision rect follows the cursor)."
+}
