@@ -92,7 +92,7 @@ export default function HotelList({
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-bold text-twt-text truncate" data-testid={`hotel-name-${h.hotel_id}`}>
+                  <span className="font-display font-bold text-twt-text truncate" data-testid={`hotel-name-${h.hotel_id}`}>
                     {h.name}
                   </span>
                   {fmtCost(h.cost, h.currency) && (

@@ -79,7 +79,7 @@ export default function AttractionItem({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span
-            className="font-bold text-twt-text truncate"
+            className="font-display font-bold text-twt-text truncate"
             data-testid={`attr-name-${attraction.attraction_id}`}
           >
             {attraction.name}

@@ -456,7 +456,7 @@ export default function Trip() {
               whileHover={{ y: -1 }}
               whileTap={{ y: 0 }}
               onClick={() => setStopModal({ open: true, editing: null })}
-              className="inline-flex items-center gap-2 bg-twt-teal text-black rounded-full pl-3 pr-5 py-2.5 font-bold glow-teal hover:bg-twt-teal-strong transition"
+              className="inline-flex items-center gap-2 bg-twt-teal text-black rounded-full pl-3 pr-5 py-2.5 font-display font-bold glow-teal hover:bg-twt-teal-strong transition"
               data-testid="add-stop-btn"
             >
               <Plus className="w-4 h-4" strokeWidth={2.5} />
