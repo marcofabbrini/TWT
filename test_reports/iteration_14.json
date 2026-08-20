@@ -1,0 +1,37 @@
+{
+  "summary": "Targeted retest of TWT Phase 5 hotfixes (backend). FIX #1 (recompute-km bumps trips.version) and FIX #2 (transport_mode='other' is not a km_calc_error) both verified. Ran dev's phase5_hotfix_test.py (3/3 green) plus a new phase5_hotfix_extra_test.py (6 new tests) covering the gaps not asserted by the dev: no version bump when updated_count==0, last_updated_by == caller user_id, last_updated_at moves forward, repeated recompute bumps each time, 'other' counted in updated_count, mixed trip reports only real errors, and 'other'->'car' flip restores km_calc_error=true. Full aggregate suite: 220 passed, 0 failed (backend_test + phase2/3/4/5/5b + hotfix + hotfix_extra). Mini frontend check confirmed: 'other' stop renders '— km' chip with 'Not calculated' tooltip, sub-header 'KM total: 574 km' correctly excludes the 'other' leg, summary.total_km=574, no console/UI errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TripCard", "issue": "Dashboard trip card km value is hardcoded to '0 km' (TripCard.jsx:105) instead of using summary.total_km — trip with 574 km shows '0 km' on the dashboard. Pre-existing, unrelated to this hotfix.", "selector": "TripCard km span", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Trip timeline — KmChip", "issues": ["Tooltip for null km is generic: 'Not calculated — edit the stop location or trigger recompute'. For transport_mode='other' this is misleading since null is a deliberate choice and recompute will never produce a value. Suggest a mode-aware tooltip (e.g. 'Not calculated — transport \"other\"')."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/phase5_hotfix_test.py",
+    "/app/backend/tests/phase5_hotfix_extra_test.py",
+    "/app/test_reports/pytest/pytest_results_iter14.xml"
+  ],
+  "action_items": [
+    "Optional (LOW): make KmChip tooltip mode-aware for transport_mode='other'.",
+    "Optional (LOW, pre-existing): TripCard.jsx:105 hardcoded '0 km' on dashboard cards."
+  ],
+  "critical_code_review_comments": [
+    "recompute_stop_km(): error_flag = (km is None) and transport != 'other' is correct, and the first-stop path returns (None, False) — both verified. Note the 'plane' + unknown-city case still (correctly) flags an error.",
+    "notifications.py recompute-km: bump_version only when updated_count > 0. Edge case: a trip where EVERY stop errors (updated_count==0, errors non-empty) will persist km_calc_error changes without a version bump, so polling clients won't refresh the error badges. Low impact but worth considering bumping when errors changed too."
+  ],
+  "updated_files": ["/app/backend/tests/phase5_hotfix_extra_test.py"],
+  "success_rate": {"backend": "100% (220/220)", "frontend": "100% (mini check on 'other' km rendering)"},
+  "seed_data_creation": "pytest fixtures self-clean (trip DELETE on teardown). UI seed users p5uihot@twt.app / p5uihot2@twt.app trips created and deleted (204) after the browser check.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "dev-login (ENV=dev) with any *.app email; ORS_MOCK=1 confirmed active",
+  "context_for_next_testing_agent": "Backend suite is fully green at 220 tests via `cd /app/backend && python -m pytest tests/ -v` (pytest.ini uses -n 2 --dist loadscope; do not edit). New file tests/phase5_hotfix_extra_test.py extends hotfix coverage (version-bump edge cases + 'other' transport). Frontend routes are /dashboard and /trip/:trip_id (NOT /trips/:id) — a previous run failed by using the wrong path. To auth in Playwright, call fetch('/api/auth/dev-login') inside page.evaluate so the httpOnly twt_session cookie is set. Known non-hotfix cosmetic items: hardcoded '0 km' in TripCard.jsx:105 and generic KmChip tooltip.",
+  "rca_of_the_issue": "Both reported bugs are fixed at the source: distance.recompute_stop_km now computes error_flag as (km is None) AND transport != 'other', so deliberate 'other' nulls fall into updated_count instead of errors[]; notifications.recompute_km now calls bump_version(trip_id, user_id) when updated_count > 0, so /trips/{id}/version increments and last_updated_by/at update, letting client polling detect the refresh. Zero-stop trips correctly leave version untouched."
+}

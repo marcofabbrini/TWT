@@ -9,6 +9,7 @@ from db import db
 from auth import require_auth
 from permissions import require_role
 from services.distance import recompute_trip_km
+from versioning import bump_version
 
 logger = logging.getLogger("twt.notifications")
 
@@ -20,6 +21,8 @@ notif_router = APIRouter(prefix="/notifications", tags=["notifications"])
 async def recompute_km(trip_id: str, current_user: dict = Depends(require_auth)):
     await require_role(trip_id, current_user["user_id"], "editor")
     result = await recompute_trip_km(trip_id)
+    if result["updated_count"] > 0:
+        await bump_version(trip_id, current_user["user_id"])
     logger.info("km.recompute trip=%s updated=%s errors=%s",
                 trip_id, result["updated_count"], len(result["errors"]))
     return result

@@ -214,12 +214,16 @@ async def compute_km(
 # ── High-level recompute for a trip ───────────────────
 async def recompute_stop_km(trip_id: str, stop_id: str) -> Tuple[Optional[float], bool]:
     """Recompute km_from_prev for a single stop (respects manual_override).
-    Returns (km, error_flag)."""
+    Returns (km, error_flag). transport_mode='other' returns (None, False) —
+    a deliberate user choice, not an error.
+    """
     stop = await db.stops.find_one({"stop_id": stop_id, "trip_id": trip_id}, {"_id": 0})
     if not stop:
         return None, False
     if stop.get("km_manual_override"):
         return stop.get("km_from_prev"), False
+
+    transport = stop.get("transport_mode", "car")
 
     # Find the previous stop by order.
     prev = await db.stops.find_one(
@@ -228,18 +232,20 @@ async def recompute_stop_km(trip_id: str, stop_id: str) -> Tuple[Optional[float]
         sort=[("order", -1)],
     )
     if not prev:
-        # First stop of the trip has no "from" — km is null.
+        # First stop of the trip has no "from" — km is null (not an error).
         await db.stops.update_one(
             {"stop_id": stop_id}, {"$set": {"km_from_prev": None, "km_calc_error": False}}
         )
         return None, False
 
-    km = await compute_km(prev["location"], stop["location"], stop.get("transport_mode", "car"))
+    km = await compute_km(prev["location"], stop["location"], transport)
+    is_other = transport == "other"
+    error_flag = (km is None) and not is_other
     await db.stops.update_one(
         {"stop_id": stop_id},
-        {"$set": {"km_from_prev": km, "km_calc_error": km is None}},
+        {"$set": {"km_from_prev": km, "km_calc_error": error_flag}},
     )
-    return km, km is None
+    return km, error_flag
 
 
 async def recompute_trip_km(trip_id: str) -> dict:
