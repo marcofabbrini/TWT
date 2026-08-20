@@ -716,7 +716,7 @@ function EmptyStops({ editable, onCreate }) {  return (
         {editable && (
           <button
             onClick={onCreate}
-            className="inline-flex items-center gap-2 bg-twt-teal text-black rounded-full pl-3 pr-5 py-2.5 font-bold glow-teal hover:bg-twt-teal-strong transition"
+            className="inline-flex items-center gap-2 bg-twt-teal text-black rounded-full pl-3 pr-5 py-2.5 font-medium glow-teal hover:bg-twt-teal-strong transition"
             data-testid="empty-stops-create-btn"
           >
             <MapPinned className="w-4 h-4" />
