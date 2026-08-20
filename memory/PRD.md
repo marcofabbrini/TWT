@@ -123,3 +123,9 @@ Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) 
 - Regression suite: `/app/backend/tests/backend_test.py` (Phase 1, 23 tests) + `/app/backend/tests/phase2_test.py` (Phase 2 + fixes, 66 tests). All green. Run: `cd /app/backend && python -m pytest tests/ -v`.
 - Orphan integrity check: `/app/test_reports/orphan_check.py`.
 - Test credentials + auth playbook: `/app/memory/test_credentials.md`, `/app/memory/auth_testing.md`.
+
+## Final Polish (Feb 2026)
+- **Task 1 — ORS Live**: `ORS_MOCK=0` with production `ORS_API_KEY` in `/app/backend/.env`. Verified live (Barcelona → Madrid = 611.6 km). Note: free-tier ORS is rate-limited (HTTP 429 possible in preview); mock stays available via `ORS_MOCK=1`.
+- **Task 2 — Dashboard summary**: `GET /api/trips` now returns per-trip `summary` `{ total_km, total_cost_home_currency, home_currency, has_missing_rates }` computed in bounded queries (1 trip_members + 1 trips + 5 batched children via `asyncio.gather` — no N+1). `TripCard.jsx` renders km with locale thousands separator (`— km` when null), cost via `Intl.NumberFormat` currency, and amber `AlertTriangle` + tooltip "Alcuni costi esclusi (tassi mancanti)" when rates missing.
+- **Regression**: 241/241 backend tests pass (9 new in `tests/trip_summary_test.py`). Frontend Playwright verified all three states (full / missing / empty).
+- **Cancelled**: Phase 6 (Emails + FX API). MVP delivered.

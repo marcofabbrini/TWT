@@ -1,7 +1,13 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { MapPin, CalendarDays, Coins, Trash2 } from "lucide-react";
+import { MapPin, CalendarDays, Coins, Trash2, AlertTriangle } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 
 const ROLE_STYLES = {
   owner: "bg-twt-teal/15 text-twt-teal border-twt-teal/25",
@@ -17,6 +23,26 @@ function formatRange(start, end) {
       year: "numeric",
     });
   return `${fmt(start)} → ${fmt(end)}`;
+}
+
+function formatKm(km) {
+  if (km === null || km === undefined) return "— km";
+  const rounded = Math.round(km);
+  return `${new Intl.NumberFormat().format(rounded)} km`;
+}
+
+function formatCost(amount, currency) {
+  const value = typeof amount === "number" ? amount : 0;
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: currency || "EUR",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${value.toFixed(2)} ${currency || ""}`.trim();
+  }
 }
 
 function CoverGradient({ seed, url }) {
@@ -43,6 +69,12 @@ function CoverGradient({ seed, url }) {
 }
 
 export default function TripCard({ trip, index = 0, onDelete }) {
+  const summary = trip.summary || {};
+  const totalKm = summary.total_km ?? null;
+  const totalCost = summary.total_cost_home_currency ?? 0;
+  const homeCurrency = summary.home_currency || trip.home_currency;
+  const hasMissingRates = !!summary.has_missing_rates;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -100,18 +132,49 @@ export default function TripCard({ trip, index = 0, onDelete }) {
             <span>{formatRange(trip.start_date, trip.end_date)}</span>
           </div>
           <div className="flex items-center gap-4 pt-3 border-t border-white/[0.06]">
-            <div className="flex items-center gap-1.5 text-xs text-twt-muted">
+            <div
+              className="flex items-center gap-1.5 text-xs text-twt-muted"
+              data-testid={`trip-km-${trip.trip_id}`}
+            >
               <MapPin className="w-3.5 h-3.5" />
-              <span className="tabular-nums">0 km</span>
+              <span className="tabular-nums">{formatKm(totalKm)}</span>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-twt-muted">
+            <div
+              className="flex items-center gap-1.5 text-xs text-twt-muted"
+              data-testid={`trip-cost-${trip.trip_id}`}
+            >
               <Coins className="w-3.5 h-3.5" />
               <span className="tabular-nums">
-                0 {trip.home_currency}
+                {formatCost(totalCost, homeCurrency)}
               </span>
+              {hasMissingRates && (
+                <TooltipProvider delayDuration={100}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        className="inline-flex"
+                        data-testid={`trip-missing-rates-${trip.trip_id}`}
+                        aria-label="Alcuni costi esclusi (tassi mancanti)"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5 text-twt-amber" />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="top"
+                      className="bg-[#14181f] text-twt-text border border-white/10"
+                    >
+                      Alcuni costi esclusi (tassi mancanti)
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
             </div>
             <div className="ml-auto text-[10px] uppercase tracking-widest text-twt-muted/70">
-              phase 1
+              trip
             </div>
           </div>
         </div>

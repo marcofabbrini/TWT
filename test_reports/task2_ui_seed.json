@@ -1,0 +1,26 @@
+{
+  "email": "uitrips@twt.app",
+  "full": "trip_0b2632c3684e48cd",
+  "missing": "trip_0ed5345772034233",
+  "empty": "trip_cd6ff2165921468d",
+  "summaries": {
+    "full": {
+      "total_km": 150.5,
+      "total_cost_home_currency": 245.0,
+      "home_currency": "EUR",
+      "has_missing_rates": false
+    },
+    "missing": {
+      "total_km": null,
+      "total_cost_home_currency": 100.0,
+      "home_currency": "EUR",
+      "has_missing_rates": true
+    },
+    "empty": {
+      "total_km": null,
+      "total_cost_home_currency": 0.0,
+      "home_currency": "EUR",
+      "has_missing_rates": false
+    }
+  }
+}

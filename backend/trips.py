@@ -1,4 +1,5 @@
 """Trips + Trip Members routes (Phase 1)."""
+import asyncio
 import logging
 from datetime import datetime, date
 from typing import List, Optional
@@ -69,7 +70,7 @@ async def create_trip(body: TripCreate, current_user: dict = Depends(require_aut
     return Trip(**_serialize_trip(trip_doc))
 
 
-@router.get("", response_model=List[TripWithRole])
+@router.get("")
 async def list_trips(current_user: dict = Depends(require_auth)):
     memberships = await db.trip_members.find(
         {"user_id": current_user["user_id"], "status": "accepted"},
@@ -82,13 +83,90 @@ async def list_trips(current_user: dict = Depends(require_auth)):
     trip_ids = list(role_by_trip.keys())
     trip_docs = await db.trips.find({"trip_id": {"$in": trip_ids}}, {"_id": 0}).to_list(500)
 
+    # Batch-fetch all children in 5 queries total (not N*5).
+    stops_docs, hotels_docs, atts_docs, exps_docs, rates_docs = await asyncio.gather(
+        db.stops.find(
+            {"trip_id": {"$in": trip_ids}},
+            {"_id": 0, "trip_id": 1, "km_from_prev": 1},
+        ).to_list(20000),
+        db.hotels.find(
+            {"trip_id": {"$in": trip_ids}},
+            {"_id": 0, "trip_id": 1, "cost": 1, "currency": 1},
+        ).to_list(20000),
+        db.attractions.find(
+            {"trip_id": {"$in": trip_ids}, "cost": {"$ne": None, "$gt": 0}},
+            {"_id": 0, "trip_id": 1, "cost": 1, "currency": 1},
+        ).to_list(20000),
+        db.expenses.find(
+            {"trip_id": {"$in": trip_ids}},
+            {"_id": 0, "trip_id": 1, "cost": 1, "currency": 1},
+        ).to_list(20000),
+        db.exchange_rates.find(
+            {"trip_id": {"$in": trip_ids}},
+            {"_id": 0, "trip_id": 1, "from_currency": 1, "to_currency": 1, "rate": 1},
+        ).to_list(20000),
+    )
+
+    from collections import defaultdict
+    km_by = defaultdict(list)
+    for s in stops_docs:
+        if s.get("km_from_prev") is not None:
+            km_by[s["trip_id"]].append(s["km_from_prev"])
+
+    items_by = defaultdict(list)  # trip_id -> [(cost, currency)]
+    for h in hotels_docs:
+        items_by[h["trip_id"]].append((h.get("cost") or 0.0, h.get("currency")))
+    for a in atts_docs:
+        items_by[a["trip_id"]].append((a["cost"], a.get("currency")))
+    for e in exps_docs:
+        items_by[e["trip_id"]].append((e.get("cost") or 0.0, e.get("currency")))
+
+    rates_by = defaultdict(dict)
+    for r in rates_docs:
+        rates_by[r["trip_id"]][(r["from_currency"], r["to_currency"])] = r["rate"]
+
     result = []
     for d in trip_docs:
         s = _serialize_trip(d)
-        s["role"] = role_by_trip.get(d["trip_id"], "viewer")
-        result.append(TripWithRole(**s))
-    # Sort by start_date desc
-    result.sort(key=lambda t: t.start_date, reverse=True)
+        tid = d["trip_id"]
+        s["role"] = role_by_trip.get(tid, "viewer")
+
+        home = d["home_currency"]
+        total_cost = 0.0
+        has_missing = False
+        for cost, cur in items_by.get(tid, []):
+            if cost is None:
+                continue
+            cur = cur or home
+            if cur == home:
+                total_cost += float(cost)
+                continue
+            r = rates_by[tid].get((cur, home))
+            if r is None:
+                has_missing = True
+                continue
+            total_cost += float(cost) * r
+
+        kms = km_by.get(tid, [])
+        total_km = round(sum(kms), 1) if kms else None
+
+        item = TripWithRole(**s).model_dump()
+        # Convert start_date/end_date to ISO strings for the response.
+        for k in ("start_date", "end_date"):
+            if hasattr(item.get(k), "isoformat"):
+                item[k] = item[k].isoformat()
+        for k in ("created_at", "updated_at"):
+            if hasattr(item.get(k), "isoformat"):
+                item[k] = item[k].isoformat()
+        item["summary"] = {
+            "total_km": total_km,
+            "total_cost_home_currency": round(total_cost, 2),
+            "home_currency": home,
+            "has_missing_rates": has_missing,
+        }
+        result.append(item)
+
+    result.sort(key=lambda t: t["start_date"], reverse=True)
     return result
 
 
