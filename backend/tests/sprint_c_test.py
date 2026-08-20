@@ -179,7 +179,16 @@ class TestTimelineReturnHome:
         days = data["days"]
         assert days[-1]["is_return_home_day"] is True
         assert all(d["is_return_home_day"] is False for d in days[:-1])
-        assert data["return_leg"] == {"home_location": "Torino, IT"}
+        # iteration_25: timeline now delegates to the canonical
+        # _build_return_leg helper, so return_leg carries the full contract
+        # (same shape as GET /route-geometry) instead of {home_location} only.
+        leg = data["return_leg"]
+        assert set(leg.keys()) == {
+            "home_location", "home_coords", "from_stop_id",
+            "transport_mode", "geojson", "distance_m", "duration_s",
+        }, leg.keys()
+        assert leg["home_location"] == "Torino, IT"
+        assert leg["transport_mode"] == "car"
 
     def test_route_geometry_return_leg_regression(self, owner, trash):
         tid = mk_trip(owner, trash, D1, D3, home_location="Torino, IT", has_return=True)

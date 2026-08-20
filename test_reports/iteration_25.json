@@ -1,0 +1,32 @@
+{
+  "summary": "Backend-only verification of the return_leg parity fix between GET /api/trips/{id}/timeline and GET /api/trips/{id}/route-geometry. (1) /app/backend/tests/return_leg_parity_test.py -> 3/3 PASS. (2) Independent verification script created a trip (has_return=true, home_location='Milano, Italia', stop 'Roma') and diffed both endpoints: key sets are exactly {home_location, home_coords, from_stop_id, transport_mode, geojson, distance_m, duration_s} on BOTH, and every value matched byte-for-byte including geojson, distance_m (572014.3) and duration_s (20244.5) - not just the required subset. Added a 2nd stop ('Firenze') and confirmed from_stop_id tracks the new last stop identically in both endpoints. (3) Regression: sprint_c(27)+sprint_ab(19)+trip_map(14)+trip_summary+orphan suites+parity = 83 passed after updating ONE stale assertion in sprint_c_test.py that still asserted the old buggy contract return_leg == {'home_location': ...}. Full tests/ dir: 294 passed, 21 failed - all 21 are the pre-existing phase5* / phase5b ORS_MOCK=0 failures already documented as known/out-of-scope in iteration_24 (mock-only city/km assertions return null with live ORS); none are related to the _build_return_leg import.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/trips/{id}/summary (phase5* suites)", "issue": "Pre-existing, unrelated: 21 phase5/phase5b/hotfix tests fail because ORS_MOCK=0 in backend/.env makes mocked-city km assertions return null (total_km=None). Same as iteration_24 known issue. Either set ORS_MOCK=1 for those suites or mark them mock-only."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/return_leg_parity_test.py",
+    "/app/test_reports/verify_return_leg_iter25.py",
+    "/app/test_reports/pytest/pytest_results_iter25.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "timeline.py now imports _build_return_leg from map_routes.py, which imports geocode/_get_or_fetch_route - correct single source of truth, no cycle observed. Consider moving _build_return_leg into a neutral module (e.g. services/route_legs.py) so timeline no longer depends on a router module; the leading underscore also signals private API being consumed cross-module.",
+    "timeline.py builds coords_list = [None]*(n-1) + [last_coords] which relies on the builder only reading coords_list[-1]. If _build_return_leg ever reads earlier coords this silently breaks; a targeted signature (last_coords only) would be safer.",
+    "Optional: phase5* suites should be parametrised on ORS_MOCK so the 21 known failures stop masking real regressions in full-suite runs."
+  ],
+  "updated_files": [
+    "/app/backend/tests/sprint_c_test.py",
+    "/app/test_reports/verify_return_leg_iter25.py"
+  ],
+  "success_rate": {"backend": "100% (83/83 in-scope: parity 3/3, sprint_c 27, sprint_ab 19, trip_map 14, trip_summary + orphan suites)", "frontend": "not tested (out of scope)"},
+  "seed_data_creation": "Trips created and deleted in-test by dev-login users return_leg_parity@twt.app, return_leg_null@twt.app, return_leg_no_stops@twt.app, rl_verify_iter25@twt.app. All trips deleted at end of each test/script.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "test_credentials": "POST /api/auth/dev-login {email} (ENV=dev) -> twt_session cookie; per /app/memory/test_credentials.md",
+  "context_for_next_testing_agent": "return_leg parity is fixed and fully verified (structural + value identity across both endpoints, with 1 and 2 stops, and null-parity for has_return=false and has_return=true+no-stops). sprint_c_test.py::TestTimelineReturnHome::test_return_home_day was updated by the testing agent to assert the NEW full-contract shape. Remaining 21 full-suite failures are ORS_MOCK=0 artefacts in phase5*/phase5b suites, pre-existing since iteration_24 - do not attribute them to timeline changes.",
+  "rca_of_the_issue": "Original bug: timeline built its own minimal return_leg dict; fix delegates to map_routes._build_return_leg. The single regression seen (sprint_c_test test_return_home_day) was a stale test asserting the old buggy contract, not an app defect - assertion updated to the documented 7-key contract."
+}

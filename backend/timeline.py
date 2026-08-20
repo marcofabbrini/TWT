@@ -17,6 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from db import db
 from auth import require_auth
 from permissions import require_role, get_trip_or_404
+from services.distance import geocode
+from map_routes import _build_return_leg
 
 router = APIRouter(prefix="/trips/{trip_id}", tags=["timeline"])
 
@@ -185,10 +187,13 @@ async def get_timeline(trip_id: str, current_user: dict = Depends(require_auth))
         idx += 1
 
     return_leg = None
-    if trip.get("has_return") and trip.get("home_location"):
-        return_leg = {
-            "home_location": trip["home_location"],
-        }
+    if trip.get("has_return") and trip.get("home_location") and stops:
+        # Reuse the exact builder used by GET /route-geometry so both endpoints
+        # emit an identical return_leg shape. Only the last stop's coords are
+        # needed to compute the closing leg → geocode just that one.
+        last_coords = await geocode(stops[-1].get("location"))
+        coords_list = [None] * (len(stops) - 1) + [last_coords]
+        return_leg = await _build_return_leg(trip, stops, coords_list)
 
     return {
         "trip_id": trip_id,
