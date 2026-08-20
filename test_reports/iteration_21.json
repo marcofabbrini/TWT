@@ -1,0 +1,46 @@
+{
+  "summary": "Backend-only verification of the generalized orphan cleanup (iteration 21). PRIMARY GATE PASSED: an independent Mongo scan (/app/test_reports/orphan_scan_iter21.py, written from scratch, not reusing the script's logic) reports 0 orphan docs in ALL 6 child collections (attractions 17, stops 614, hotels 150, expenses 40, exchange_rates 22, trip_members 1150 docs scanned; 0 orphans each, 0 docs missing the trip_id field). cleanup_orphan_expenses.py run twice: rc=0, 'orphans_found=0 removed=0' both times, per_coll all zeros -> idempotent. Regression: orphan_expenses_test.py 2/2 PASS, orphan_cascade_iter20_test.py 7/7 PASS (TestDbIntegrity, which failed on legacy hotels/exchange_rates in iter20, is now GREEN), sprint_ab_test.py + trip_map_test.py + trip_summary_test.py 42/42 PASS. Added /app/backend/tests/orphan_cascade_iter21_test.py (2/2 PASS) which seeds a trip with 1 stop + 1 hotel + 1 attraction + 1 expense(stop_id=null) + 1 expense(stop_id set) + 1 explicit PUT exchange-rate, asserts pre-delete count>0 in ALL 6 collections (iter20 only asserted 4), DELETEs the trip and asserts 0 rows remain everywhere plus trips=0. Stress check: ran the ENTIRE tests/ dir under pytest-xdist loadscope (the same parallel pattern that produced the original 2026-08-20 09:30 race) -> 263 passed / 22 failed, and a re-scan afterwards still reports TOTAL_ORPHANS=0 across all 6 collections, i.e. the race window did not recur. The 22 failures are unrelated to this iteration (see minor issues).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "tests/phase5_test.py, phase5b_test.py, phase5_hotfix*_test.py (21 tests)", "issue": "PRE-EXISTING / config-dependent, not a regression. /app/backend/.env has ORS_MOCK=\"0\" (real ORS key active), but these legacy suites hard-code the mocked distance table, so they fail on real ORS values (e.g. Roma-Milano assert 572.0 == 574.0, Roma-Napoli 225.9 vs 225.0, London-Paris 462.0 vs 460.0). Either gate these suites with pytest.mark.skipif(ORS_MOCK!=1) or assert with a tolerance. No app-code defect."},
+      {"endpoint": "tests/phase2_test.py::TestStopsCreate::test_create_stop_fields_and_order", "issue": "FLAKY (~1 run in the full parallel suite): RemoteDisconnected('Remote end closed connection without response') when many real-ORS stop creations run concurrently under xdist. Passes 1/1 in isolation. Likely request timeout/keep-alive under load, not a logic bug."},
+      {"endpoint": "trips.py::delete_trip", "issue": "Cascade omits db.trip_presence (which does carry trip_id and IS purged in members.py:183). Low severity because trip_presence has a 60s TTL index (db.py:67) so rows self-expire, but for symmetry delete_trip should also delete_many trip_presence, and trip_presence should ideally be added to CHILD_COLLECTIONS in the cleanup script."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/orphan_cascade_iter21_test.py",
+    "/app/test_reports/orphan_scan_iter21.py",
+    "/app/test_reports/pytest/iter21_orphan.xml",
+    "/app/test_reports/pytest/iter21_regression.xml",
+    "/app/test_reports/pytest/iter21_cascade.xml",
+    "/app/test_reports/pytest/iter21_full.xml"
+  ],
+  "action_items": [
+    "Nothing blocking — the orphan cleanup goal is fully met and verified (0 orphans, idempotent, cascade proven live for all 6 collections).",
+    "Optional: add db.trip_presence.delete_many({'trip_id': trip_id}) to trips.py::delete_trip and add 'trip_presence' to CHILD_COLLECTIONS for completeness.",
+    "Optional housekeeping: legacy phase5* suites need an ORS_MOCK guard or km tolerance so the full-suite run is green with ORS_MOCK=0.",
+    "Optional: the dev Mongo now holds 789 trips / 1208 trip_members of accumulated TEST_ debris; consider a purge-by-title-prefix maintenance script."
+  ],
+  "critical_code_review_comments": [
+    "cleanup_orphan_expenses.py uses coll.distinct('trip_id') which is capped by the 16MB BSON limit; with 1200+ trip_members rows it is fine today, but an aggregation pipeline ($group / $lookup on trips) would be safer at scale.",
+    "main() returns total_removed but __main__ always sys.exit(0) — intentional (keeps CI green) but means a non-zero removal is not detectable via exit code; callers must grep the 'removed=' line. Documented behaviour, matches the idempotency test.",
+    "The script's file name (cleanup_orphan_expenses.py) no longer reflects its generalized scope over all child collections; consider renaming to cleanup_orphan_children.py with a shim, since the module docstring is now the only hint."
+  ],
+  "updated_files": [
+    "/app/backend/tests/orphan_cascade_iter21_test.py (new)",
+    "/app/test_reports/orphan_scan_iter21.py (new)"
+  ],
+  "success_rate": {"backend": "100% on all in-scope suites (9/9 orphan+cascade, 42/42 regression, 2/2 new iter21); 92% (263/285) on the entire tests/ dir, all 22 failures pre-existing/config-related", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "dev-login users orphan_regress@twt.app and orphan_regress_v2@twt.app; all TEST_Iter21* trips and their children were created and then deleted by the cascade tests (verified 0 rows remain).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "POST /api/auth/dev-login {email,name} (ENV=dev) -> httpOnly twt_session cookie + session_token; used orphan_regress_v2@twt.app.",
+  "context_for_next_testing_agent": "Orphan saga is CLOSED: run `cd /app/backend && python /app/test_reports/orphan_scan_iter21.py` for a one-shot integrity check of all 6 child collections (expect TOTAL_ORPHANS=0), and `python -m pytest tests/orphan_cascade_iter21_test.py tests/orphan_cascade_iter20_test.py tests/orphan_expenses_test.py -q` (11 tests) as the regression gate. Verified the orphan invariant holds even after a full parallel xdist run of tests/. NOTE: /app/backend/.env has ORS_MOCK=\"0\", so the phase5*/phase5b km suites fail on real-ORS distances — do NOT report those as new regressions, and do not flip ORS_MOCK without restarting backend and reverting afterwards. Frontend has been untested for two iterations (last frontend defects are in iteration_19.json).",
+  "rca_of_the_issue": "Root cause of the historical orphans was a legacy 2026-08-20 09:30-09:34 pytest-xdist window predating the complete cascade in trips.py::delete_trip; the live code path (lines 278-285) purges attractions/stops/hotels/expenses/exchange_rates/trip_members before deleting the trip and was already correct. The generalized cleanup script removed the 11 remaining legacy docs (10 hotels + 1 exchange_rates) in the prior run; this iteration independently confirms 0 orphans remain, that a re-run removes nothing (idempotent), and that a live create-then-delete leaves zero rows in every child collection."
+}

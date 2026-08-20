@@ -1,0 +1,43 @@
+{
+  "summary": "Backend-only WARN-followup verification (iteration 20). Ran the new /app/backend/tests/orphan_expenses_test.py (2/2 PASS), the full regression set sprint_ab_test.py + trip_map_test.py + trip_summary_test.py (42/42 PASS), and re-ran the cleanup script a 3rd/4th time (idempotent, removed=0, rc=0). Verified via direct Mongo scan that orphan EXPENSES = 0. Also hardened the new test (it silently skipped its direct-Mongo asserts because pytest does not inherit MONGO_URL/DB_NAME) and added a broader cascade+integrity suite. NEW FINDING: the same legacy 2026-08-20 09:30-09:34 xdist window also left 10 orphan `hotels` docs and 1 orphan `exchange_rates` doc, which the expenses-only cleanup script does not touch. Live DELETE /api/trips/{id} cascade is confirmed correct for ALL child collections (new test proves stops/hotels/expenses/attractions/exchange_rates/trip_members all reach 0).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "scripts/cleanup_orphan_expenses.py", "issue": "Cleanup only covers `expenses`. DB still holds 10 orphan `hotels` (trip_eeb8c23f259f4d62, trip_40d9c11778fa403e, trip_6ad4c7d4f8ef41ce, trip_c3f92a049ed54774, trip_397d023c5fa34e0f) and 1 orphan `exchange_rates` (trip_eeb8c23f259f4d62) from the identical legacy 09:30-09:34 window. Generalize the script to loop over all child collections (stops, hotels, expenses, attractions, exchange_rates, trip_members)."},
+      {"endpoint": "tests/orphan_expenses_test.py", "issue": "Its 'belt-and-braces' direct-Mongo assertions were inside `if mongo_url and db_name:` and pytest does not inherit MONGO_URL/DB_NAME, so they never executed (test looked green without verifying Mongo). Fixed by me: now resolved via dotenv_values('/app/backend/.env') + hard assert; assertions now genuinely run and pass."},
+      {"endpoint": "N/A (test hygiene)", "issue": "trips collection keeps growing (750 -> 751 across this run); regression suites do not clean up created trips. Not a product bug but pollutes the DB and slows future integrity scans."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/orphan_expenses_test.py",
+    "/app/backend/tests/orphan_cascade_iter20_test.py",
+    "/app/test_reports/pytest/iteration20_orphan.xml",
+    "/app/test_reports/pytest/iteration20_cascade.xml",
+    "/app/test_reports/pytest/iteration20_regression.xml",
+    "/app/test_reports/orphan_check_iter20.py",
+    "/app/test_reports/inspect_orphans_iter20.py"
+  ],
+  "action_items": [
+    "Extend cleanup_orphan_expenses.py (or add cleanup_orphan_children.py) to purge orphans in hotels, exchange_rates, stops, attractions, trip_members — 11 legacy orphan docs remain; then tests/orphan_cascade_iter20_test.py::TestDbIntegrity will be fully green (2 currently failing on legacy data only).",
+    "Optional: add trip teardown fixtures to the regression suites so pytest runs stop accumulating trips."
+  ],
+  "critical_code_review_comments": [
+    "delete_trip cascade in backend/trips.py:270-286 verified correct for every child collection — no app fix needed.",
+    "cleanup script's `sys.exit(0 if n >= 0 else 1)` can never be non-zero since main() always returns >=0; the return value is effectively unused. Harmless but misleading.",
+    "Guard against future orphans structurally: unique/compound index or a periodic integrity job, since cleanup scripts are reactive only."
+  ],
+  "updated_files": [
+    "/app/backend/tests/orphan_expenses_test.py",
+    "/app/backend/tests/orphan_cascade_iter20_test.py",
+    "/app/test_reports/orphan_check_iter20.py",
+    "/app/test_reports/inspect_orphans_iter20.py"
+  ],
+  "success_rate": {"backend": "96% (49/51 assertions-suites pass; the 2 failures are legacy orphan hotels/exchange_rates data, not code)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "dev-login user orphan_regress@twt.app; transient trips TEST_FullCascade / OrphanRegress created and deleted within tests.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "POST /api/auth/dev-login {email: orphan_regress@twt.app} (ENV=dev), cookie twt_session",
+  "context_for_next_testing_agent": "Orphan EXPENSES are 0 and stay 0; cleanup script idempotent (verified 4 runs). Remaining orphans are hotels(10)+exchange_rates(1) from the same legacy window — run /app/test_reports/orphan_check_iter20.py to re-check all collections. /app/backend/tests/orphan_cascade_iter20_test.py::TestFullCascade proves the live cascade purges every child collection. Frontend untested this iteration by request.",
+  "rca_of_the_issue": "Legacy pytest-xdist race (2026-08-20 09:30-09:34) between fixture teardown (DELETE trip) and child-document inserts left orphan children. The application cascade is correct; the orphans are historical. Cleanup was scoped to expenses only, so hotels/exchange_rates orphans from the same window persist."
+}

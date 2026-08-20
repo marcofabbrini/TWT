@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="7" time="1.633" timestamp="2026-08-20T13:55:42.099854+00:00" hostname="agent-env-3dbfbce3-8f9a-4fac-901b-45bc191058a5"><testcase classname="tests.orphan_cascade_iter20_test.TestDbIntegrity" name="test_no_orphan_expenses_remain" time="0.065" /><testcase classname="tests.orphan_cascade_iter20_test.TestDbIntegrity" name="test_no_orphans_in_other_child_collections[stops]" time="0.002" /><testcase classname="tests.orphan_cascade_iter20_test.TestDbIntegrity" name="test_no_orphans_in_other_child_collections[hotels]" time="0.003"><failure message="AssertionError: hotels has 10 orphan docs (trip_ids=['trip_397d023c5fa34e0f', 'trip_40d9c11778fa403e', 'trip_6ad4c7d4f8ef41ce', 'trip_c3f92a049ed54774', 'trip_eeb8c23f259f4d62'])&#10;assert ['trip_eeb8c2...8ef41ce', ...] == []&#10;  &#10;  Left contains 10 more items, first extra item: 'trip_eeb8c23f259f4d62'&#10;  &#10;  Full diff:&#10;  - []&#10;  + [&#10;  +     'trip_eeb8c23f259f4d62',...&#10;  &#10;  ...Full output truncated (10 lines hidden), use '-vv' to show">tests/orphan_cascade_iter20_test.py:113: in test_no_orphans_in_other_child_collections
+    assert orphans == [], f"{coll} has {len(orphans)} orphan docs (trip_ids={sorted(set(orphans))})"
+E   AssertionError: hotels has 10 orphan docs (trip_ids=['trip_397d023c5fa34e0f', 'trip_40d9c11778fa403e', 'trip_6ad4c7d4f8ef41ce', 'trip_c3f92a049ed54774', 'trip_eeb8c23f259f4d62'])
+E   assert ['trip_eeb8c2...8ef41ce', ...] == []
+E     
+E     Left contains 10 more items, first extra item: 'trip_eeb8c23f259f4d62'
+E     
+E     Full diff:
+E     - []
+E     + [
+E     +     'trip_eeb8c23f259f4d62',...
+E     
+E     ...Full output truncated (10 lines hidden), use '-vv' to show</failure></testcase><testcase classname="tests.orphan_cascade_iter20_test.TestDbIntegrity" name="test_no_orphans_in_other_child_collections[attractions]" time="0.002" /><testcase classname="tests.orphan_cascade_iter20_test.TestDbIntegrity" name="test_no_orphans_in_other_child_collections[exchange_rates]" time="0.002"><failure message="AssertionError: exchange_rates has 1 orphan docs (trip_ids=['trip_eeb8c23f259f4d62'])&#10;assert ['trip_eeb8c23f259f4d62'] == []&#10;  &#10;  Left contains one more item: 'trip_eeb8c23f259f4d62'&#10;  &#10;  Full diff:&#10;  - []&#10;  + [&#10;  +     'trip_eeb8c23f259f4d62',&#10;  + ]">tests/orphan_cascade_iter20_test.py:113: in test_no_orphans_in_other_child_collections
+    assert orphans == [], f"{coll} has {len(orphans)} orphan docs (trip_ids={sorted(set(orphans))})"
+E   AssertionError: exchange_rates has 1 orphan docs (trip_ids=['trip_eeb8c23f259f4d62'])
+E   assert ['trip_eeb8c23f259f4d62'] == []
+E     
+E     Left contains one more item: 'trip_eeb8c23f259f4d62'
+E     
+E     Full diff:
+E     - []
+E     + [
+E     +     'trip_eeb8c23f259f4d62',
+E     + ]</failure></testcase><testcase classname="tests.orphan_cascade_iter20_test.TestDbIntegrity" name="test_no_orphans_in_other_child_collections[trip_members]" time="0.003" /><testcase classname="tests.orphan_cascade_iter20_test.TestFullCascade" name="test_delete_trip_purges_every_child_collection" time="0.843" /></testsuite></testsuites>
