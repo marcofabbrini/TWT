@@ -9,6 +9,7 @@ from db import db
 from auth import require_auth
 from models import ExchangeRate, ExchangeRateUpsert, utcnow, new_id
 from permissions import require_role
+from versioning import bump_version
 
 logger = logging.getLogger("twt.rates")
 router = APIRouter(prefix="/trips/{trip_id}/exchange-rates", tags=["exchange_rates"])
@@ -59,6 +60,7 @@ async def upsert_rate(
             "updated_by": current_user["user_id"],
         }
         await db.exchange_rates.insert_one(doc)
+    await bump_version(trip_id, current_user["user_id"])
     logger.info("rates.upsert trip=%s %s->%s=%s", trip_id, body.from_currency, body.to_currency, body.rate)
     return ExchangeRate(**_serialize(doc))
 
@@ -73,4 +75,5 @@ async def delete_rate(
     r = await db.exchange_rates.delete_one({"rate_id": rate_id, "trip_id": trip_id})
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Rate not found")
+    await bump_version(trip_id, current_user["user_id"])
     return None

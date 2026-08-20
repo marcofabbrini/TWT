@@ -1,3 +1,5 @@
+// PresencePod is defined at the bottom of the file.
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -9,6 +11,7 @@ import {
   MapPinned,
   Compass,
   Coins,
+  Users,
 } from "lucide-react";
 import { DndContext, closestCorners, DragOverlay } from "@dnd-kit/core";
 
@@ -23,11 +26,15 @@ import ExpensesSection from "@/components/ExpensesSection";
 import ExchangeRatesDialog from "@/components/ExchangeRatesDialog";
 import TripTotals from "@/components/TripTotals";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
+import MembersDialog from "@/components/MembersDialog";
 import useDndReorder from "@/hooks/useDndReorder";
+import useTripSync from "@/hooks/useTripSync";
+import useTripPresence from "@/hooks/useTripPresence";
 
 import { api } from "@/lib/api";
 import { canEdit as canEditRole } from "@/lib/permissions";
 import { toast } from "sonner";
+import { useAuth } from "@/context/AuthContext";
 import { transportOf } from "@/lib/transport";
 
 function fmtLongDate(iso) {
@@ -46,12 +53,14 @@ const ROLE_STYLES = {
 
 export default function Trip() {
   const { trip_id } = useParams();
+  const { user: me } = useAuth();
   const [trip, setTrip] = useState(null);
   const [error, setError] = useState("");
   const [stops, setStops] = useState([]);
   const [hotelsByStop, setHotelsByStop] = useState({});
   const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [stopModal, setStopModal] = useState({ open: false, editing: null });
@@ -67,6 +76,7 @@ export default function Trip() {
   });
   const [expenseModal, setExpenseModal] = useState({ open: false, editing: null });
   const [ratesOpen, setRatesOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(false);
   const [pendingStopDelete, setPendingStopDelete] = useState(null);
   const [pendingAttrDelete, setPendingAttrDelete] = useState(null);
   const [pendingHotelDelete, setPendingHotelDelete] = useState(null);
@@ -96,15 +106,17 @@ export default function Trip() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [tripRes, stopsRes, expRes] = await Promise.all([
+      const [tripRes, stopsRes, expRes, membersRes] = await Promise.all([
         api.get(`/trips/${trip_id}`),
         api.get(`/trips/${trip_id}/stops`),
         api.get(`/trips/${trip_id}/expenses`),
+        api.get(`/trips/${trip_id}/members`),
       ]);
       setTrip(tripRes.data);
       const sortedStops = [...stopsRes.data].sort((a, b) => a.order - b.order);
       setStops(sortedStops);
       setExpenses(expRes.data);
+      setMembers(membersRes.data);
 
       const [attrEntries, hotelEntries] = await Promise.all([
         Promise.all(
@@ -133,6 +145,22 @@ export default function Trip() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Sync polling — silent refetch on version change.
+  useTripSync(trip_id, () => loadAll());
+
+  // Presence — heartbeat + list.
+  const currentEditing =
+    stopModal.editing?.stop_id
+      ? `stop:${stopModal.editing.stop_id}`
+      : attractionModal.editing?.attraction_id
+      ? `attraction:${attractionModal.editing.attraction_id}`
+      : hotelModal.editing?.hotel_id
+      ? `hotel:${hotelModal.editing.hotel_id}`
+      : expenseModal.editing?.expense_id
+      ? `expense:${expenseModal.editing.expense_id}`
+      : null;
+  const presence = useTripPresence(trip_id, currentEditing);
 
   const stopsById = useMemo(
     () => Object.fromEntries(stops.map((s) => [s.stop_id, s])),
@@ -330,6 +358,16 @@ export default function Trip() {
             {trip.role}
           </span>
           <TripTotals summary={summary} onOpenRates={() => setRatesOpen(true)} />
+          <PresencePod presence={presence} meId={me?.user_id} />
+          <button
+            type="button"
+            onClick={() => setMembersOpen(true)}
+            className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
+            data-testid="members-open-btn"
+            aria-label="Collaborators"
+          >
+            <Users className="w-4 h-4" />
+          </button>
           <button
             type="button"
             onClick={() => setRatesOpen(true)}
@@ -452,6 +490,7 @@ export default function Trip() {
         tripId={trip_id}
         trip={trip}
         stops={stops}
+        members={members}
         editingExpense={expenseModal.editing}
         onSaved={handleExpenseSaved}
       />
@@ -462,6 +501,17 @@ export default function Trip() {
         trip={trip}
         isOwner={isOwner}
         onChanged={refreshSummary}
+      />
+      <MembersDialog
+        open={membersOpen}
+        onOpenChange={setMembersOpen}
+        tripId={trip_id}
+        isOwner={isOwner}
+        onChanged={loadAll}
+        onLeft={() => {
+          setMembersOpen(false);
+          window.location.href = "/dashboard";
+        }}
       />
 
       <ConfirmDeleteDialog
@@ -523,8 +573,7 @@ function KmChip({ km, transport }) {
   );
 }
 
-function EmptyStops({ editable, onCreate }) {
-  return (
+function EmptyStops({ editable, onCreate }) {  return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
@@ -561,5 +610,36 @@ function EmptyStops({ editable, onCreate }) {
         )}
       </div>
     </motion.div>
+  );
+}
+
+function PresencePod({ presence, meId }) {
+  const others = (presence || []).filter((p) => p.user_id !== meId);
+  if (others.length === 0) return null;
+  return (
+    <div className="hidden md:flex -space-x-2" data-testid="presence-pod">
+      {others.slice(0, 4).map((p) => (
+        <div
+          key={p.user_id}
+          className="w-7 h-7 rounded-full ring-2 ring-[#08090C] overflow-hidden relative"
+          title={`${p.name}${p.editing ? " — editing " + p.editing : ""}`}
+          data-testid={`presence-${p.user_id}`}
+        >
+          {p.avatar_url ? (
+            <img src={p.avatar_url} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full grid place-items-center bg-twt-teal text-black font-bold text-xs">
+              {(p.name || "?").charAt(0).toUpperCase()}
+            </div>
+          )}
+          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-twt-teal ring-2 ring-[#08090C]" />
+        </div>
+      ))}
+      {others.length > 4 && (
+        <div className="w-7 h-7 rounded-full ring-2 ring-[#08090C] bg-white/10 grid place-items-center text-[10px] text-twt-muted">
+          +{others.length - 4}
+        </div>
+      )}
+    </div>
   );
 }

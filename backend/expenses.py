@@ -9,9 +9,28 @@ from db import db
 from auth import require_auth
 from models import Expense, ExpenseCreate, ExpenseUpdate, utcnow, new_id
 from permissions import get_trip_or_404, require_role
+from versioning import bump_version
 
 logger = logging.getLogger("twt.expenses")
 router = APIRouter(prefix="/trips/{trip_id}/expenses", tags=["expenses"])
+
+
+async def _validate_split(trip_id: str, user_ids: list) -> None:
+    """All user_ids must be accepted members of this trip."""
+    if not user_ids:
+        return
+    unique_ids = list(set(user_ids))
+    docs = await db.trip_members.find(
+        {"trip_id": trip_id, "status": "accepted", "user_id": {"$in": unique_ids}},
+        {"_id": 0, "user_id": 1},
+    ).to_list(500)
+    found = {d["user_id"] for d in docs}
+    missing = set(unique_ids) - found
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"split_between contains non-member user_ids: {sorted(missing)}",
+        )
 
 
 def _serialize(doc: dict) -> dict:
@@ -58,6 +77,7 @@ async def create_expense(
     paid_by = body.paid_by or current_user["user_id"]
     split_between = body.split_between or [current_user["user_id"]]
     currency = body.currency or trip["home_currency"]
+    await _validate_split(trip_id, split_between + [paid_by])
 
     doc = {
         "expense_id": new_id("exp_"),
@@ -73,6 +93,7 @@ async def create_expense(
         "updated_at": utcnow().isoformat(),
     }
     await db.expenses.insert_one(doc)
+    await bump_version(trip_id, current_user["user_id"])
     logger.info("expenses.create trip=%s exp=%s", trip_id, doc["expense_id"])
     return Expense(**_serialize(doc))
 
@@ -92,8 +113,13 @@ async def update_expense(
     updates = body.model_dump(exclude_unset=True)
     if "stop_id" in updates:
         await _validate_stop(trip_id, updates["stop_id"])
+    if "split_between" in updates or "paid_by" in updates:
+        new_split = updates.get("split_between", existing.get("split_between") or [])
+        new_paid_by = updates.get("paid_by", existing.get("paid_by"))
+        await _validate_split(trip_id, list(new_split) + ([new_paid_by] if new_paid_by else []))
     updates["updated_at"] = utcnow().isoformat()
     await db.expenses.update_one({"expense_id": expense_id}, {"$set": updates})
+    await bump_version(trip_id, current_user["user_id"])
     doc = await db.expenses.find_one({"expense_id": expense_id}, {"_id": 0})
     return Expense(**_serialize(doc))
 
@@ -108,4 +134,5 @@ async def delete_expense(
     r = await db.expenses.delete_one({"expense_id": expense_id, "trip_id": trip_id})
     if r.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Expense not found")
+    await bump_version(trip_id, current_user["user_id"])
     return None

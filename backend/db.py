@@ -60,4 +60,13 @@ async def ensure_indexes() -> None:
         unique=True,
     )
 
+    # trip_presence (Phase 4) — TTL for auto-cleanup
+    await db.trip_presence.create_index(
+        [("trip_id", ASCENDING), ("user_id", ASCENDING)], unique=True
+    )
+    await db.trip_presence.create_index("last_seen_at", expireAfterSeconds=60)
+
+    # trip_members Phase 4 additions
+    await db.trip_members.create_index("invite_token", sparse=True, unique=True)
+
     logger.info("MongoDB indexes ensured")

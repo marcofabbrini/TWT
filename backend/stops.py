@@ -10,6 +10,7 @@ from db import db
 from auth import require_auth
 from models import Stop, StopCreate, StopUpdate, ReorderStops, utcnow, new_id
 from permissions import get_trip_or_404, require_role, trip_date_range
+from versioning import bump_version
 
 logger = logging.getLogger("twt.stops")
 router = APIRouter(prefix="/trips/{trip_id}/stops", tags=["stops"])
@@ -72,6 +73,7 @@ async def create_stop(trip_id: str, body: StopCreate, current_user: dict = Depen
         "updated_at": utcnow().isoformat(),
     }
     await db.stops.insert_one(doc)
+    await bump_version(trip_id, current_user["user_id"])
     logger.info("stops.create trip=%s stop=%s", trip_id, doc["stop_id"])
     return Stop(**_serialize(doc))
 
@@ -109,6 +111,7 @@ async def update_stop(
 
     updates["updated_at"] = utcnow().isoformat()
     await db.stops.update_one({"stop_id": stop_id}, {"$set": updates})
+    await bump_version(trip_id, current_user["user_id"])
     doc = await db.stops.find_one({"stop_id": stop_id}, {"_id": 0})
     return Stop(**_serialize(doc))
 
@@ -138,6 +141,7 @@ async def delete_stop(trip_id: str, stop_id: str, current_user: dict = Depends(r
     if ops:
         await db.stops.bulk_write(ops, ordered=False)
 
+    await bump_version(trip_id, current_user["user_id"])
     logger.info("stops.delete trip=%s stop=%s", trip_id, stop_id)
     return None
 
@@ -175,5 +179,6 @@ async def reorder_stops(
     if result.matched_count != len(body.stop_ids):
         raise HTTPException(status_code=500, detail="Partial reorder failure")
 
+    await bump_version(trip_id, current_user["user_id"])
     docs = await db.stops.find({"trip_id": trip_id}, {"_id": 0}).sort("order", ASCENDING).to_list(500)
     return [Stop(**_serialize(d)) for d in docs]

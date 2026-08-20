@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from db import db
 from models import Trip, TripCreate, TripWithRole, utcnow, new_id
 from auth import require_auth
+from versioning import bump_version
 
 logger = logging.getLogger("twt.trips")
 router = APIRouter(prefix="/trips", tags=["trips"])
@@ -49,6 +50,7 @@ async def create_trip(body: TripCreate, current_user: dict = Depends(require_aut
         "cover_image_url": body.cover_image_url,
         "created_at": utcnow().isoformat(),
         "updated_at": utcnow().isoformat(),
+        "version": 0,
     }
     await db.trips.insert_one(trip_doc)
 

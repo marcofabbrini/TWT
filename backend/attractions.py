@@ -17,6 +17,7 @@ from models import (
     new_id,
 )
 from permissions import get_trip_or_404, require_role
+from versioning import bump_version
 
 logger = logging.getLogger("twt.attractions")
 
@@ -120,6 +121,7 @@ async def create_attraction(
         "updated_at": utcnow().isoformat(),
     }
     await db.attractions.insert_one(doc)
+    await bump_version(trip_id, current_user["user_id"])
     logger.info("attractions.create trip=%s stop=%s att=%s", trip_id, stop_id, doc["attraction_id"])
     return Attraction(**_serialize(doc))
 
@@ -141,6 +143,7 @@ async def update_attraction(
     updates = body.model_dump(exclude_unset=True)
     updates["updated_at"] = utcnow().isoformat()
     await db.attractions.update_one({"attraction_id": attraction_id}, {"$set": updates})
+    await bump_version(trip_id, current_user["user_id"])
     doc = await db.attractions.find_one({"attraction_id": attraction_id}, {"_id": 0})
     return Attraction(**_serialize(doc))
 
@@ -159,6 +162,7 @@ async def delete_attraction(
         raise HTTPException(status_code=404, detail="Attraction not found")
     await db.attractions.delete_one({"attraction_id": attraction_id, "trip_id": trip_id})
     await _renormalize_stop_attractions(trip_id, existing["stop_id"])
+    await bump_version(trip_id, current_user["user_id"])
     return None
 
 
@@ -253,5 +257,6 @@ async def reorder_attractions(
         if result.matched_count != len(ops):
             raise HTTPException(status_code=500, detail="Partial reorder failure")
 
+    await bump_version(trip_id, current_user["user_id"])
     docs = await db.attractions.find({"trip_id": trip_id}, {"_id": 0}).sort("order", ASCENDING).to_list(2000)
     return [Attraction(**_serialize(d)) for d in docs]

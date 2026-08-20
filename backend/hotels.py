@@ -9,6 +9,7 @@ from db import db
 from auth import require_auth
 from models import Hotel, HotelCreate, HotelUpdate, utcnow, new_id
 from permissions import get_trip_or_404, require_role
+from versioning import bump_version
 
 logger = logging.getLogger("twt.hotels")
 
@@ -78,6 +79,7 @@ async def create_hotel(
         "updated_at": utcnow().isoformat(),
     }
     await db.hotels.insert_one(doc)
+    await bump_version(trip_id, current_user["user_id"])
     logger.info("hotels.create trip=%s stop=%s hotel=%s", trip_id, stop_id, doc["hotel_id"])
     return Hotel(**_serialize(doc))
 
@@ -109,6 +111,7 @@ async def update_hotel(
 
     updates["updated_at"] = utcnow().isoformat()
     await db.hotels.update_one({"hotel_id": hotel_id}, {"$set": updates})
+    await bump_version(trip_id, current_user["user_id"])
     doc = await db.hotels.find_one({"hotel_id": hotel_id}, {"_id": 0})
     return Hotel(**_serialize(doc))
 
@@ -123,4 +126,5 @@ async def delete_hotel(
     result = await db.hotels.delete_one({"hotel_id": hotel_id, "trip_id": trip_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Hotel not found")
+    await bump_version(trip_id, current_user["user_id"])
     return None

@@ -58,6 +58,15 @@ Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) 
 - Dashboard: glass trip cards, empty state, create modal, delete confirmation.
 - Landing hero + feature grid.
 
+### Phase 4 (2026-02, verified 181/181 backend + all frontend)
+- Members mgmt: `POST /trips/{id}/invites` (owner-only, generates share link), `GET/POST/decline /invites/{token}` public accept flow with email match.
+- Roles enforced everywhere: viewer read-only, editor CRUD but no members/rates/delete-trip, owner full access. `require_role` returns 403 for member-without-perm, 404 for non-member.
+- Transfer ownership on leave: oldest editor promoted; if no editors, trip is hard-deleted with full cascade.
+- Sync polling: `GET /trips/{id}/version` bumped by every mutation; frontend `useTripSync` polls 5s with silent refetch, stops on 401/403/404.
+- Presence: `GET/POST /trips/{id}/presence` with 60s TTL index; `useTripPresence` heartbeat 10s + list 5s; `PresencePod` shows online avatars.
+- Split expenses: `split_between` validated against accepted members; `GET /trips/{id}/debts` returns balances + minimum-cash-flow settlements.
+- `POST /api/auth/dev-login-as` (ENV=dev) creates user + membership in one call for tests.
+
 ### Phase 3 (2026-02, verified 145/145 backend + all frontend)
 - Hotels CRUD per stop (multipli supportati), inside StopCard with edit/delete on hover.
 - Expenses CRUD tied to optional stop_id, defaults `paid_by` and `split_between` to current user (Phase 4 will expand to collaborators).

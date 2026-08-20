@@ -1,0 +1,40 @@
+{
+  "summary": "Phase 4 retest of the 3 reported fixes + full regression. Backend: full suite 181/181 PASSED (pytest -n2), including the two previously failing TestSplitAndDebts::test_debts_scenario (alice +50 / bob -50, settlements [{bob->alice,50}]) and ::test_debts_missing_rate. Empty-members debts path now returns home_currency (members.py:370). Frontend: (a) clipboard blocked (navigator.clipboard.writeText rejecting NotAllowedError + execCommand throwing) -> 'Copy blocked — long-press the link to copy manually' toast, NO CRA runtime-error overlay, dialog stays usable; (b) after owner removed the viewer via API, /version + /presence polling stopped — only 3 residual requests in the first ~10s and 0 requests in the 10-20s window (previously an endless 404 stream); (c) regressions green: external mutation (SYNCED_STOP added by another session) appeared without reload within the 5s poll, presence pod showed the other user ~5s after their heartbeat, ExpenseModal split checkboxes toggle and show '€30.00 per person', expense persisted and Spend total updated to €90.00.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/trips/{id}/debts", "issue": "Expenses with an empty split_between (ExpenseModal allows unchecking every member) are silently skipped, so the cost shows in 'Spend total' (e.g. €90) but contributes nothing to balances/settlements. Consider defaulting split to the payer or validating non-empty split."},
+      {"endpoint": "POST /api/trips/{id}/invites", "issue": "invite_url is returned relative ('/invite/<token>') because FRONTEND_URL is not set in backend/.env — the copied link is not shareable outside the app. Carried over from iteration 9."},
+      {"endpoint": "misc (carried over, unfixed)", "issue": "Body validation still runs before role check (viewer gets 422 instead of 403); dead `existing` query in create_invite; re-visited accepted invite returns 404 instead of 410; no PATCH /api/trips/{id}."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Trip page (post access-loss state)", "issue": "After the user is removed from a trip, polling correctly stops but the page keeps rendering the stale trip content and the VIEWER role badge — no 'you no longer have access' state until a reload. Low priority UX gap.", "selector": "[data-testid=\"trip-error\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/phase4_test.py",
+    "/app/test_reports/pytest/pytest_results_iter10.xml",
+    "/app/test_reports/seed_ui_iter10.py"
+  ],
+  "action_items": [
+    "No blocking action items — all three reported fixes are verified working and the whole backend suite is green.",
+    "Optional: set FRONTEND_URL so invite_url is absolute; decide behaviour for expenses with empty split_between; render an access-revoked state on the trip page once polling stops."
+  ],
+  "critical_code_review_comments": [
+    "members.py:423-431 — greedy algorithm now operates on dict copies; balances_list is returned untouched. Correct.",
+    "useTripSync.js — the very first tick() runs before `timer` is assigned, so a 404 on the first call cannot clear the (not-yet-created) interval; the next tick clears it. Costs at most one extra request (observed 2-3 residual requests). Acceptable, but a `stopped` ref would be cleaner and also guard the visibilitychange re-tick.",
+    "useTripPresence.js — same pattern; heartbeat and list intervals are cleared independently on 401/403/404. The `currentEditing` effect still posts presence with a bare .catch(() => {}) and is not gated by the stop flag (one-off request, harmless)."
+  ],
+  "updated_files": ["/app/test_reports/seed_ui_iter10.py", "/app/test_reports/iteration_10.json"],
+  "success_rate": {"backend": "100% (181/181)", "frontend": "100% of retested flows (clipboard fallback, polling stop, sync, presence, expense split)"},
+  "seed_data_creation": "Two throwaway trips seeded via /app/test_reports/seed_ui_iter10.py (owners i10owner_d6edc2@twt.app, i10owner_4bcf2e@twt.app) — both DELETEd at the end of the run. Dev users remain in the users collection.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "/app/memory/test_credentials.md — POST /api/auth/dev-login {email,name}; POST /api/auth/dev-login-as {email,trip_id,role} (ENV=dev). Cookie twt_session or Bearer session_token.",
+  "context_for_next_testing_agent": "All 181 backend tests pass (pytest /app/backend/tests/ -q). Trip page testids: members-open-btn, rates-open-btn, trip-role-badge, presence-pod, add-expense-btn (in ExpensesSection), add-stop-btn. MembersDialog uses invite-send-btn (not invite-submit-btn) and invite-copy-btn. IMPORTANT for ExpenseModal: split_between is pre-checked for ALL accepted members by default — clicking the split-option labels UNCHECKS them; use locator('[data-testid^=\"split-option-\"] input[type=checkbox]').check(). To block the clipboard use page.add_init_script overriding navigator.clipboard.writeText + document.execCommand. To simulate a second session use fetch(..., {credentials:'omit', headers:{Authorization:'Bearer <session_token>'}}).",
+  "rca_of_the_issue": "Previous defects confirmed fixed: (1) balances aliasing — settlement loop now runs on dict copies, so balances survive serialization; (2) copyLink wrapped in try/catch with textarea+execCommand fallback and an error toast, so a rejected writeText no longer escapes as an unhandled rejection into the CRA overlay; (3) both hooks inspect e.response.status and clearInterval on 401/403/404, stopping the 404 flood after membership removal (measured: 0 polling requests 10s after removal)."
+}

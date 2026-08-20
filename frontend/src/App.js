@@ -12,6 +12,7 @@ import Landing from "@/pages/Landing";
 import Dashboard from "@/pages/Dashboard";
 import Trip from "@/pages/Trip";
 import AuthCallback from "@/pages/AuthCallback";
+import InvitePage from "@/pages/InvitePage";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
 function AppRouter() {
@@ -40,6 +41,7 @@ function AppRouter() {
           </ProtectedRoute>
         }
       />
+      <Route path="/invite/:token" element={<InvitePage />} />
       <Route path="*" element={<Landing />} />
     </Routes>
   );

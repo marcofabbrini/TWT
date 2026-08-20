@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from "react";
-import {
+import React, { useEffect, useState } from "react";import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -19,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
-import { Loader2, Receipt } from "lucide-react";
+import { Loader2, Receipt, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -31,6 +30,7 @@ const empty = {
   currency: "EUR",
   stop_id: "__none__",
   notes: "",
+  split_between: [],
 };
 
 export default function ExpenseModal({
@@ -39,6 +39,7 @@ export default function ExpenseModal({
   tripId,
   trip,
   stops,
+  members = [],
   editingExpense,
   onSaved,
 }) {
@@ -46,21 +47,34 @@ export default function ExpenseModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  const acceptedMembers = React.useMemo(
+    () => (members || []).filter((m) => m.status === "accepted" && m.user?.user_id),
+    [members]
+  );
+
   useEffect(() => {
     if (!open) return;
     if (editingExpense) {
       setForm({
         label: editingExpense.label || "",
-        cost: editingExpense.cost === undefined || editingExpense.cost === null ? "" : String(editingExpense.cost),
+        cost:
+          editingExpense.cost === undefined || editingExpense.cost === null
+            ? ""
+            : String(editingExpense.cost),
         currency: editingExpense.currency || trip?.home_currency || "EUR",
         stop_id: editingExpense.stop_id || "__none__",
         notes: editingExpense.notes || "",
+        split_between: editingExpense.split_between || [],
       });
     } else {
-      setForm({ ...empty, currency: trip?.home_currency || "EUR" });
+      setForm({
+        ...empty,
+        currency: trip?.home_currency || "EUR",
+        split_between: acceptedMembers.map((m) => m.user.user_id),
+      });
     }
     setError("");
-  }, [open, editingExpense, trip]);
+  }, [open, editingExpense, trip, acceptedMembers]);
 
   const update = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -76,6 +90,7 @@ export default function ExpenseModal({
       cost: Number(form.cost),
       currency: form.currency,
       stop_id: form.stop_id === "__none__" ? null : form.stop_id,
+      split_between: form.split_between,
       notes: form.notes || null,
     };
 
@@ -192,6 +207,56 @@ export default function ExpenseModal({
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-twt-muted text-xs uppercase tracking-widest inline-flex items-center gap-2">
+              <Users className="w-3.5 h-3.5" /> Split between
+            </Label>
+            <div className="glass rounded-xl p-2 max-h-40 overflow-y-auto space-y-1" data-testid="split-between-list">
+              {acceptedMembers.length === 0 ? (
+                <div className="text-xs text-twt-muted px-2 py-1">
+                  No members yet — costs will be tracked as yours.
+                </div>
+              ) : (
+                acceptedMembers.map((m) => {
+                  const uid = m.user.user_id;
+                  const checked = form.split_between.includes(uid);
+                  return (
+                    <label
+                      key={uid}
+                      className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-white/5 cursor-pointer"
+                      data-testid={`split-option-${uid}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...form.split_between, uid]
+                            : form.split_between.filter((x) => x !== uid);
+                          update("split_between", next);
+                        }}
+                        className="accent-twt-teal"
+                      />
+                      <span className="text-sm">{m.user.name || m.user.email}</span>
+                      <span className="text-[10px] uppercase tracking-widest text-twt-muted ml-auto">
+                        {m.role}
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            {form.cost !== "" && form.split_between.length > 0 && (
+              <div className="text-xs text-twt-muted tabular-nums">
+                {new Intl.NumberFormat("en-US", {
+                  style: "currency",
+                  currency: form.currency,
+                }).format(Number(form.cost) / form.split_between.length)}{" "}
+                per person
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1.5">
             <Label className="text-twt-muted text-xs uppercase tracking-widest">Notes</Label>
             <Textarea

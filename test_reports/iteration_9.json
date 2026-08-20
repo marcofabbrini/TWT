@@ -1,0 +1,55 @@
+{
+  "summary": "Phase 4 full backend + frontend testing. Added /app/backend/tests/phase4_test.py (36 tests). Full suite: 179/181 passed (145 Phase1-3 regression all green; 34/36 Phase 4 green). One real backend bug found: GET /api/trips/{id}/debts returns all balances as 0.0 because the greedy settlement loop mutates the same dicts that are returned in `balances`. Frontend: invite page (unknown/expired token, logged-out CTA, wrong-email mismatch, accept->redirect), MembersDialog (owner invite + copy link + pending row + role select + remove; non-owner leave flow), 5s sync polling (external stop appeared in ~2s without reload), presence pod (appeared ~5s after other user's heartbeat), ExpenseModal split checkboxes with '€25.00 per person' preview — all working. One frontend bug: clipboard copy throws an unhandled NotAllowedError producing a full-screen CRA runtime-error overlay.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "GET /api/trips/{trip_id}/debts", "issue": "All `balances[].balance` values are returned as 0.0 (netted to zero) while `settlements` are correct. Root cause: members.py get_debts builds `creditors`/`debtors` from the SAME dict objects in `balances_list` and then mutates c['balance']/d['balance'] inside the settlement loop, zeroing the response. Verified: alice pays 100 EUR split 50/50 -> settlements [{bob->alice, 50}] but balances {alice:0.0, bob:0.0} (expected +50/-50). Fix: run the greedy algorithm over copies (e.g. [dict(b) for b in balances_list]).", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "GET /api/trips/{trip_id}/debts", "issue": "Early-return path when no accepted members omits the `home_currency` key (returns only balances/settlements/missing_rates) — response shape is inconsistent with the success path."},
+      {"endpoint": "POST /api/trips/{trip_id}/stops/{stop_id}/hotels (and other body-validated mutations)", "issue": "Pydantic validation runs before the role check, so a VIEWER posting an invalid body gets 422 instead of 403 (permission leak of validation details). Verified with viewer + hotel payload missing check_in."},
+      {"endpoint": "POST /api/auth/dev-login / dev-login-as", "issue": "user.email is stored/returned with original casing (not lowercased) while invites lowercase invited_email. Match is done case-insensitively today, but normalizing on upsert would prevent future duplicate-user rows for mixed-case emails."},
+      {"endpoint": "POST /api/trips/{trip_id}/invites", "issue": "Dead code: the first `existing = db.trip_members.find_one({... '$or': [...{'user_id': {'$ne': None}}]})` query result is never used (superseded by the `dup`/`dup2` checks). Remove it (one wasted DB round-trip per invite)."},
+      {"endpoint": "GET /api/invites/{token} after accept/decline", "issue": "invite_token is $unset on accept/decline, so a re-visited link returns 404 'Invite not found' instead of the spec'd 410 'no longer active'. Frontend copy still reads acceptably, but the 410 branch is effectively unreachable."},
+      {"endpoint": "trips router", "issue": "No PATCH/PUT /api/trips/{trip_id} exists (405), so trip metadata (title/dates/home_currency) cannot be edited by owner or editor. Flagging as a functional gap, not a Phase 4 regression."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "MembersDialog", "issue": "Clicking the invite copy button calls navigator.clipboard.writeText without a try/catch — when clipboard permission is denied (headless/limited-permission browsers, insecure contexts) the rejected promise surfaces as a full-screen 'Uncaught runtime errors: NotAllowedError: Failed to execute writeText on Clipboard' overlay that hides the whole dialog, even though the success toast is shown. Wrap in try/catch with a textarea/execCommand fallback and error toast.", "selector": "[data-testid=\"invite-copy-btn\"]", "priority": "MEDIUM"},
+      {"component": "useTripSync / useTripPresence", "issue": "After the user loses access (leave/removal), the polling hooks keep firing /version, /presence and /members and produce a stream of 404s in the console (15+ within ~3s on the trip-error page). Polling should stop on 403/404.", "selector": "n/a", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Trip page / MembersDialog / InvitePage", "issues": ["No visual/contrast/spacing problems found at 1920x1080; role badge, presence pod, pending-invite row and split preview all render legibly."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/phase4_test.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/seed_ui_p4.py",
+    "/app/test_reports/debug_debts_p4.py"
+  ],
+  "action_items": [
+    "FIX (critical): members.py get_debts — compute settlements on copies so `balances` are not zeroed out.",
+    "FIX: MembersDialog copyLink — wrap navigator.clipboard.writeText in try/catch with fallback (currently crashes the app with a runtime-error overlay).",
+    "Consider: stop sync/presence polling on 403/404; return home_currency in the empty-members debts path; enforce role check before body validation; remove dead duplicate-invite query; add PATCH /api/trips/{trip_id}."
+  ],
+  "critical_code_review_comments": [
+    "members.py:424-444 — greedy settlement loop mutates the dicts referenced by `balances_list`, corrupting the API response. Use deep copies for the algorithm.",
+    "members.py:94-100 — unused `existing` query; delete.",
+    "Permission ordering: FastAPI validates the body before the endpoint runs require_role, so viewers can receive 422 detail for endpoints they may not touch. Consider a dependency-level role guard.",
+    "Frontend hooks (useTripSync/useTripPresence) swallow all errors silently and never back off — add stop-on-404/403 to avoid infinite 404 loops after access loss."
+  ],
+  "updated_files": [
+    "/app/backend/tests/phase4_test.py",
+    "/app/test_reports/seed_ui_p4.py",
+    "/app/test_reports/debug_debts_p4.py"
+  ],
+  "success_rate": {"backend": "98.9% (179/181; both failures = single debts-balances bug)", "frontend": "95% (all Phase 4 flows pass; 1 clipboard crash, 1 polling noise)"},
+  "seed_data_creation": "Phase 4 backend tests self-seed unique TEST_* users/trips per run via dev-login / dev-login-as. UI seed: owner p4owner_e67390@twt.app, trip trip_53c4f08f80ba463f (TEST_P4_UI_e67390) with stops Madrid + SYNCED_STOP, invitee p4invitee_e67390@twt.app (accepted editor, then left), pending invite for p4newinvitee_e67390@twt.app.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "/app/memory/test_credentials.md — POST /api/auth/dev-login {email,name}; POST /api/auth/dev-login-as {email,trip_id,role} (ENV=dev). Cookie twt_session; Bearer session_token also accepted.",
+  "context_for_next_testing_agent": "Run `pytest /app/backend/tests/ -q` (181 tests; pytest.ini forces -n 2 --dist loadscope). Only TestSplitAndDebts::test_debts_scenario and ::test_debts_missing_rate fail, both due to the balances-aliasing bug in members.get_debts (settlements are correct, balances all 0.0); test_debts_missing_rate additionally fails cascade-style because the scenario test's cleanup never runs. Correct route shapes for this app: stops /api/trips/{tid}/stops[/{sid}], attractions POST /api/trips/{tid}/stops/{sid}/attractions + PATCH/DELETE /api/trips/{tid}/attractions/{aid}, hotels analogous (require check_in/check_out), rates DELETE /api/trips/{tid}/exchange-rates/{rate_id}. Stops use title+location (not city/country). No PATCH /api/trips/{tid} exists. For frontend auth in Playwright: fetch('/api/auth/dev-login', {credentials:'include'}) sets the httpOnly cookie; use credentials:'omit' + Bearer to simulate a second session for sync/presence tests. Confirm-dialog testids follow `{testId}-confirm` (e.g. leave-trip-dialog-confirm).",
+  "rca_of_the_issue": "get_debts builds balances_list, then filters it into creditors/debtors lists holding references to the SAME dict objects. The min-cash-flow loop subtracts settled amounts from c['balance']/d['balance'], mutating balances_list in place, so by the time the response is serialized every settled participant's balance reads ~0.0. Reproduce: owner (EUR trip) + editor accepted, POST expense cost=100 currency=EUR paid_by=owner split_between=[owner,editor], then GET /api/trips/{id}/debts -> settlements [{editor->owner, 50.0}] but balances both 0.0. Mitigation: work_list = [dict(b) for b in balances_list] before the greedy loop and return the untouched balances_list."
+}

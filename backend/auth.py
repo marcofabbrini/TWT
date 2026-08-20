@@ -224,6 +224,12 @@ async def logout(
     return {"ok": True}
 
 
+class DevLoginAsRequest(BaseModel):
+    email: EmailStr
+    trip_id: str
+    role: str  # "owner"|"editor"|"viewer"
+
+
 @router.post("/dev-login")
 async def dev_login(body: DevLoginRequest, response: Response):
     """
@@ -248,3 +254,59 @@ async def dev_login(body: DevLoginRequest, response: Response):
         "user": UserPublic(**user).model_dump(),
         "session_token": session_token,  # useful for Bearer testing
     }
+
+
+@router.post("/dev-login-as")
+async def dev_login_as(body: DevLoginAsRequest, response: Response):
+    """DEV-ONLY: create/upsert user + add as accepted trip_member with the given role.
+    Useful for testing role permissions without going through the invite flow.
+    """
+    if ENV != "dev":
+        raise HTTPException(status_code=404, detail="Not found")
+    if body.role not in ("owner", "editor", "viewer"):
+        raise HTTPException(status_code=422, detail="role must be owner|editor|viewer")
+
+    user = await _upsert_user(
+        email=body.email,
+        name=body.email.split("@")[0].replace(".", " ").title(),
+        picture=None,
+        google_id=None,
+    )
+
+    trip = await db.trips.find_one({"trip_id": body.trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    existing = await db.trip_members.find_one(
+        {"trip_id": body.trip_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if existing:
+        await db.trip_members.update_one(
+            {"member_id": existing["member_id"]},
+            {"$set": {"role": body.role, "status": "accepted"}},
+        )
+    else:
+        await db.trip_members.insert_one({
+            "member_id": new_id("mem_"),
+            "trip_id": body.trip_id,
+            "user_id": user["user_id"],
+            "invited_email": body.email.lower(),
+            "role": body.role,
+            "status": "accepted",
+            "created_at": utcnow().isoformat(),
+        })
+
+    session_token = f"dev_{new_id()}"
+    await _create_session(user_id=user["user_id"], session_token=session_token)
+    _set_session_cookie(response, session_token)
+
+    logger.info(
+        "auth.dev_login_as user=%s trip=%s role=%s", user["user_id"], body.trip_id, body.role
+    )
+    return {
+        "user": UserPublic(**user).model_dump(),
+        "session_token": session_token,
+        "trip_id": body.trip_id,
+        "role": body.role,
+    }
+
