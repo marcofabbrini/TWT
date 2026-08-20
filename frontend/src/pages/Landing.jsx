@@ -80,7 +80,7 @@ export default function Landing() {
           <h1 className="text-display text-6xl sm:text-7xl lg:text-8xl leading-[0.95] tracking-tight mb-6">
             Plan a trip.
             <br />
-            <span className="italic text-twt-teal">Without the trap.</span>
+            <span className="text-twt-teal">Without the trap.</span>
           </h1>
           <p className="text-lg text-twt-muted max-w-lg mb-10">
             Every stop, every ticket, every currency — one place. No spreadsheets, no forgotten
@@ -117,7 +117,7 @@ export default function Landing() {
                 <div className="text-[10px] uppercase tracking-widest text-twt-muted">
                   Coming soon · Portugal
                 </div>
-                <div className="text-display text-4xl mt-1">Iberian Loop</div>
+                <div className="text-display text-4xl mt-1 font-nunito">Iberian Loop</div>
               </div>
               <div className="text-xs text-twt-teal border border-twt-teal/30 rounded-full px-2 py-0.5">
                 owner

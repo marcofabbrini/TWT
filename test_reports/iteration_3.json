@@ -1,0 +1,38 @@
+{
+  "summary": "Phase 2 retest after main-agent fixes (cascade delete, full-permutation reorder, booking_link scheme validation). Backend: full regression Phase 1 (backend_test.py) + Phase 2 (phase2_test.py) = 89 tests, 89 passed, 0 failed, 0 xfail (run twice for flake check). The 2 previously xfail 'known defect' tests were converted to plain asserts and now pass strictly. Added a new TestPhase2Fixes class (20 tests) covering: (a) DELETE /api/trips/{id} cascade verified directly in Mongo — trip with 2 stops + 4 attractions => stops/attractions/trip_members/trips counts all 0 and GET returns 404; cascade does NOT touch a sibling trip's stops/attractions; (b) /stops/reorder full permutation returns 200 with order [0,1,2] matching submitted order and persisting on GET; strict subset -> 422 with ZERO mutation (orders unchanged, no duplicate order values); duplicates ([a,a] and [a,b,b]) -> 422; superset with unknown id -> 422; empty stop_ids -> 422; (c) booking_link scheme validation on POST /stops/{sid}/attractions rejects javascript:, JavaScript: (case-insensitive), data:, ftp://, //evil.com and bare 'example.com' with 422; accepts https://, http://, null and empty string; PATCH /trips/{tid}/attractions/{aid} rejects javascript: with 422 and leaves the previous link intact, accepts http:// (persisted) and explicit null. Also fixed a pre-existing cross-class dependency in TestStopsReorder::test_reorder_sets_index which failed intermittently under pytest.ini's -n 2 --dist loadscope (it assumed stops created by TestStops on the module-scoped trip); it now seeds its own stops. Mongo integrity check script added: after full suite + UI run there are 0 orphan stops / 0 orphan attractions / 0 orphan trip_members (before the fix iteration_2 reported 35/20 orphans). Frontend smoke (public preview URL, dev-login alice): /dashboard renders 4 trip cards with no orphan/ghost trips, /trip/{id} loads 2 stop cards + 3 attractions, cross-stop drag of attraction A1 from Lisbon drop zone to Porto drop zone persisted after full page reload (verified by reading stop-drop-zone content post-reload), no console errors other than the expected pre-login 401 on /api/auth/me.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/trips/{trip_id}", "issue": "Cascade is 4 sequential delete_many/delete_one calls without a Mongo session/transaction — a crash between them can still leave partial orphans. Low probability, but consider a session or ordering trips-last (current order already deletes trip last, which is the safer ordering). No functional failure observed."},
+      {"endpoint": "DELETE /api/trips/{trip_id}/stops/{stop_id}", "issue": "Still no re-normalization of remaining stop.order after a delete, so gaps remain (carried over from iteration_2; cosmetic today, but note /stops/reorder now requires a FULL permutation so any client-side partial reorder will 422)."},
+      {"endpoint": "POST /api/trips/{trip_id}/attractions/reorder", "issue": "Unchanged from iteration_2: bulk_write is not transactional; the 500 'Partial reorder failure' branch can theoretically leave a partially applied reorder."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Trip page (/trip/{id})", "issues": ["Connector chip still renders '– km' placeholder between stops when km_from_prev is null (visual noise)", "'KM total: —' / 'Spend total: —' still placeholders (expected per Phase 2 scope)", "Attraction edit/delete controls remain hover-only with no focus-visible state (keyboard inaccessible) — carried over from iteration_2"]},
+      {"screen": "Stop modal", "issues": ["Still native <input type=date> instead of shadcn Calendar; out-of-range dates blocked only by browser constraint validation (carried over)"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/phase2_test.py", "/app/backend/tests/backend_test.py", "/app/test_reports/pytest/pytest_results.xml", "/app/test_reports/orphan_check.py", "/app/test_reports/seed_ui.py"],
+  "action_items": [
+    "Nothing blocking. Optional hardening: wrap the trip cascade delete in a Mongo session/transaction; re-normalize stop.order after a stop delete; keep frontend stop reorder payloads as full permutations (server now returns 422 for subsets — confirm Trip.jsx always sends all stop_ids if stop drag&drop is added in Phase 3)."
+  ],
+  "critical_code_review_comments": [
+    "trips.delete_trip cascade order (attractions -> stops -> trip_members -> trip) is correct; consider a session so a mid-flight failure cannot orphan rows.",
+    "stops.reorder_stops now does duplicate + set-equality checks before bulk_write — good; the later matched_count!=len check is now effectively dead code for valid inputs, keep it as a safety net.",
+    "models.AttractionBase._link_scheme / AttractionUpdate._link_scheme are duplicated verbatim — extract a shared validator helper (DRY).",
+    "booking_link validation is prefix-based (http://, https://) rather than a parsed URL; 'https://' alone or 'http:// spaces' would pass validation and render as a dead href. Consider urllib.parse with a netloc check.",
+    "Trip.jsx remains ~600 lines with fetch/DnD/modal state co-located — split before Phase 3."
+  ],
+  "updated_files": ["/app/backend/tests/phase2_test.py", "/app/test_reports/orphan_check.py", "/app/test_reports/seed_ui.py"],
+  "success_rate": {"backend": "100% (89/89 passed, 2 runs)", "frontend": "100% of smoke flows (dashboard list, trip page render, cross-stop drag persistence)"},
+  "seed_data_creation": "All TEST_ trips created by the suite and the UI trip TEST_UI_P2FIX (trip_81df7fc9a03f4b97) were deleted; cascade verified => 0 orphans in Mongo. Remaining data belongs to the real user (trip_59e9ebde15d745d1 'USA' with Roma/Los Angeles stops) and was left untouched.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "POST /api/auth/dev-login {email,name} with ENV=dev. alice@twt.app / bob@twt.app / carol@twt.app. httpOnly cookie twt_session + session_token in body.",
+  "context_for_next_testing_agent": "phase2_test.py now has 4 classes of interest: TestKnownDefects (xfail removed, plain asserts) and TestPhase2Fixes (cascade / full-permutation reorder / booking_link scheme). pytest.ini forces -n 2 --dist loadscope, so every test CLASS must seed its own stops/attractions — do not rely on state from another class using the module-scoped `trip` fixture (this caused a flaky failure this iteration, now fixed). Use /app/test_reports/orphan_check.py after any run to assert 0 orphan stops/attractions. UI seeding helper: /app/test_reports/seed_ui.py prints trip/stop/attraction ids for Playwright. Frontend drag recipe (works headless): mouse.move to attr-drag-{id} center -> mouse.down -> 5px jiggle -> move to stop-drop-zone-{stop_id} in 25 steps -> 400ms pause -> mouse.up -> reload and read the drop-zone text.",
+  "rca_of_the_issue": "Both iteration_2 defects are resolved. Cascade: trips.delete_trip now delete_many on attractions and stops before trip_members/trips (verified in Mongo, 0 orphans across a full suite run + UI run). Reorder: stops.reorder_stops now compares set(body.stop_ids) to the set of ALL trip stop_ids and rejects duplicates, so subsets/supersets return 422 with no mutation. booking_link: field validators on AttractionBase/AttractionUpdate reject any value not prefixed http:// or https:// (case-insensitive), producing 422 for javascript:/data:/ftp:/protocol-relative URLs. The only remaining test-side issue was a cross-class fixture dependency in TestStopsReorder under loadscope parallelism, fixed by making the class seed its own stops."
+}

@@ -69,7 +69,7 @@ export default function Dashboard() {
               your journeys
             </div>
             <h1 className="text-display text-5xl sm:text-6xl leading-none">
-              Where <span className="italic text-twt-teal">next?</span>
+              Where <span className="text-twt-teal">next?</span>
             </h1>
           </div>
           <button

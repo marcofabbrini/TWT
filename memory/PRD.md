@@ -1,76 +1,97 @@
 # TWT — Trip Without Trap
 
 ## Original problem statement
-Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) for planning trips. This is **Phase 1 of 5**: foundations + dashboard + trip creation only. No stops, no attractions, no currency conversion, no collaborators yet.
+Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) for planning trips. 5 phases total. Phase 1: foundations + dashboard. Phase 2: stops + attractions + drag&drop. Phase 3: hotels. Phase 4: collaborators. Phase 5: expenses + KM auto-calc + currency conversion.
 
 ## Design
 - Dark mode by default (no toggle).
 - Glassmorphism: blurred surfaces, subtle borders, dark gradients.
-- Accent color: **Teal-mint (#5EEAD4)** as primary; Amber (#F5B841) reserved for badges/state.
-- Fonts: **Instrument Serif** (display) + **Sora** (body). Both loaded via Google Fonts.
-- Icons: lucide-react. Motion: framer-motion.
+- Accent color: **Teal-mint (#5EEAD4)**; Amber (#F5B841) reserved for state badges (cost, editor role).
+- Font: **Sniglet** (400 / 800) as global sans + display — rounded, playful, distinctive.
+- Localized override: `.font-nunito` for the "Iberian Loop" mock title on the Landing hero (per user request, line 120 of Landing.jsx).
+- Icons: lucide-react. Motion: framer-motion. Drag&Drop: @dnd-kit.
 
 ## Architecture
-- Backend `/app/backend/` — FastAPI. All routes prefixed `/api`. Modules:
-  - `server.py` — app bootstrap, CORS, index init, health/openapi.
-  - `db.py` — Motor Mongo client + `ensure_indexes()`.
-  - `models.py` — Pydantic models for User, Trip, TripMember + documented future schemas (Stop, Attraction, Hotel, Expense, ExchangeRate).
-  - `auth.py` — Emergent-managed Google Auth. Endpoints: `/auth/google/login`, `/auth/session`, `/auth/me`, `/auth/logout`, `/auth/dev-login` (ENV=dev only). `require_auth` supports cookie + Bearer.
-  - `trips.py` — POST/GET/DELETE `/api/trips` with membership enforcement.
-- Frontend `/app/frontend/src/` — React + CRACO. AuthContext, ProtectedRoute, glass utility classes in `index.css`, brand tokens in `tailwind.config.js`.
+- Backend `/app/backend/`
+  - `server.py` — app bootstrap, CORS, index init, `openapi_url=/api/openapi.json`.
+  - `db.py` — Motor client + `ensure_indexes()`.
+  - `models.py` — Pydantic models (User, Trip, TripMember, Stop, Attraction) + reorder DTOs.
+  - `auth.py` — Emergent Google Auth + `require_auth` (cookie + Bearer) + `dev-login` (ENV=dev only).
+  - `permissions.py` — `get_trip_or_404`, `get_membership_or_404`, `require_role` (viewer<editor<owner).
+  - `trips.py` — POST/GET/DELETE `/api/trips`. **Delete cascades attractions → stops → trip_members → trip.**
+  - `stops.py` — CRUD + reorder (full-permutation required).
+  - `attractions.py` — CRUD + cross-stop atomic reorder (pre-validate + bulk_write).
+- Frontend `/app/frontend/src/`
+  - Pages: `Landing`, `Dashboard`, `Trip`, `AuthCallback`.
+  - Components: `Header`, `TripCard`, `CreateTripModal`, `StopCard`, `StopModal`, `AttractionItem`, `AttractionModal`, `ProtectedRoute`.
+  - Libs: `api.js`, `permissions.js` (canEdit), `transport.js` (icon map).
 
 ## Collections + indexes
 - `users` (user_id unique, email unique, google_id sparse)
 - `user_sessions` (session_token unique, user_id, TTL on expires_at)
 - `trips` (trip_id unique, owner_id, start_date desc)
 - `trip_members` (member_id unique, (trip_id,user_id), user_id, invited_email)
+- `stops` (stop_id unique, (trip_id, order))
+- `attractions` (attraction_id unique, (trip_id, stop_id, order))
 
 ## User personas
-- Solo traveler mapping their next trip.
-- Small group of friends splitting a shared route (Phase 3+).
+- Solo traveler drafting a next trip.
+- Small group of friends splitting a shared route (Phase 4+).
 
 ## Core static requirements
 1. Google OAuth via Emergent — httpOnly cookie `twt_session`, secure, SameSite=None.
-2. All `/api/trips/*` require membership check via `trip_members`.
-3. Trip `home_currency` is immutable (no PATCH endpoint on that field).
-4. Data isolation: user A cannot see user B's trips.
+2. All trip-scoped routes require membership check via `trip_members`.
+3. `home_currency` is immutable (no PATCH endpoint on that field).
+4. Data isolation: user A cannot see user B's trips/stops/attractions.
 5. `/api/openapi.json` exposed.
 6. `POST /api/auth/dev-login` active only when `ENV=dev`.
+7. Editor+Owner can create/update/delete stops/attractions; Viewer read-only.
+8. Trip delete cascades **all** related data (verified: 0 orphans).
+9. Booking link URLs must start with `http://` or `https://` (rejects `javascript:`, `data:`, etc.).
 
-## Implemented (2026-02)
-- Emergent Google Auth end-to-end + dev-login for tests.
-- Users upsert-by-email; sessions with TTL and cookie clear on logout.
-- Trip CRUD (create/list/detail/delete). List sorted by start_date desc.
-- Membership auto-created on trip creation (role=owner).
-- Cascade delete of trip_members on trip delete (owner-only).
-- Dashboard: glass trip cards, empty state, create-trip modal (title/currency/dates/cover URL), delete confirmation.
-- `/trip/{id}` placeholder for Phase 2 with membership check.
-- Landing hero with mock trip preview, animated ambient orbs, feature grid.
-- Tests: 23/23 backend pytest, all frontend flows verified via Playwright.
+## Implemented
+
+### Phase 1 (2026-02, verified 23/23 backend + all frontend)
+- Emergent Google Auth end-to-end + dev-login.
+- Users upsert-by-email; TTL sessions; cookie clear on logout.
+- Trip CRUD (list sorted by start_date desc). Membership auto-created on trip create.
+- Dashboard: glass trip cards, empty state, create modal, delete confirmation.
+- Landing hero + feature grid.
+
+### Phase 2 (2026-02, verified 89/89 backend + all frontend, 0 orphans)
+- Stops CRUD (create/list/patch/delete) with cascade on stop delete and full-permutation reorder.
+- Attractions CRUD with atomic cross-stop reorder (pre-validation + bulk_write).
+- Timeline UI with numbered stop bubbles, transport icon, KM chip between stops (placeholder), sticky trip sub-header with role badge and totals placeholders.
+- @dnd-kit drag & drop for attractions: same-stop reorder + cross-stop move; optimistic UI with rollback on failure.
+- Role-gated UI: viewer sees no edit buttons/drag handles.
+- Global font swap to Sniglet (removed Instrument Serif + Sora). Localized Nunito override on Landing "Iberian Loop" title.
+- Booking link scheme validation (server + client fed by 422).
+- Trip delete now cascade-deletes attractions + stops + trip_members + trip.
 
 ## Backlog
 
-### P0 (blocking Phase 2 start)
-- Stops CRUD (`stops` collection + `/api/trips/{id}/stops`).
-- Route ordering (drag & drop).
-- Map view (Leaflet or Mapbox) with stop pins.
+### P0 (Phase 3)
+- Hotels per stop: name, check_in/out (within stop range), price, currency, booking URL.
+- Small dashboard for hotels inside `StopCard`.
 
-### P1
-- Attractions per stop (category, schedule).
-- Hotels per stop with price + booking URL.
-- Cover image upload (Emergent Object Storage, not URL field).
-
-### P2
-- Expenses with automatic conversion to `home_currency` via `exchange_rates` collection.
+### P1 (Phase 4)
 - Collaborators: invite by email, roles editor/viewer, pending → accepted flow.
+- Notification when invite is accepted.
 - Trip export (PDF / shareable public read-only page).
+
+### P2 (Phase 5)
+- Expenses with automatic conversion to `home_currency` via `exchange_rates` collection (CoinGecko or Alpha Vantage integration).
+- KM auto-calc via geocoding + routing (OpenRouteService or Mapbox).
+- Map view with route polyline + stop pins.
 - Profile page (change avatar, home_currency_default).
 
-## Known limitations
-- No pagination on `/api/trips` (in-memory sort acceptable for Phase 1).
-- Native date inputs in create-trip modal (not shadcn Calendar) — kept simple; can be upgraded in P2.
-- CORS is wildcard with `allow_credentials=true` in dev — pin origins before production.
+## Known limitations (non-blocking)
+- `stops` order is not renormalized after a single-stop delete (gaps remain; cosmetic — timeline uses index-based numbering).
+- Attractions reorder uses bulk_write without a Mongo session/transaction (safe under pre-validation; edge case only if crash mid-write).
+- Trip.jsx is ~600 lines — split before Phase 4 (state + DnD logic).
+- Native `<input type=date>` in modals — not shadcn Calendar (kept simple for now).
 
 ## Testing
-- Regression pytest suite: `/app/backend/tests/backend_test.py` (`cd /app/backend && python -m pytest tests/backend_test.py -v`).
+- Regression suite: `/app/backend/tests/backend_test.py` (Phase 1, 23 tests) + `/app/backend/tests/phase2_test.py` (Phase 2 + fixes, 66 tests). All green. Run: `cd /app/backend && python -m pytest tests/ -v`.
+- Orphan integrity check: `/app/test_reports/orphan_check.py`.
 - Test credentials + auth playbook: `/app/memory/test_credentials.md`, `/app/memory/auth_testing.md`.

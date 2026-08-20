@@ -1,13 +1,13 @@
 """
 Pydantic models for TWT (Trip Without Trap).
 
-Phase 1 exposes only: users, trips, trip_members via API.
-Schemas for stops, attractions, hotels, expenses, exchange_rates are
-documented below but NOT exposed via API yet. They will be used in later phases.
+Phase 1: users, trips, trip_members.
+Phase 2: stops, attractions.
+Future schemas (hotels, expenses, exchange_rates) documented below.
 """
 from datetime import datetime, timezone, date
 from typing import Optional, List, Literal
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, HttpUrl
 import uuid
 
 
@@ -106,34 +106,154 @@ class TripMember(BaseModel):
 
 
 # ─────────────────────────────────────────────────────────────
-# FUTURE SCHEMAS — NOT EXPOSED YET (Phase 2+)
-# These are documented here so later phases can reuse them.
+# STOP (Phase 2)
 # ─────────────────────────────────────────────────────────────
-#
-# class Stop(BaseModel):
-#     stop_id: str
-#     trip_id: str
-#     title: str
-#     location: str
-#     lat: float
-#     lng: float
-#     arrival_date: date
-#     departure_date: date
-#     order_index: int
-#     notes: Optional[str] = None
-#     created_at: datetime
-#
-# class Attraction(BaseModel):
-#     attraction_id: str
-#     stop_id: str
-#     trip_id: str
-#     title: str
-#     category: str  # e.g. "museum", "landmark", "restaurant"
-#     scheduled_at: Optional[datetime] = None
-#     price_amount: Optional[float] = None
-#     price_currency: Optional[str] = None
-#     notes: Optional[str] = None
-#     completed: bool = False
+TRANSPORT_MODES = ["car", "plane", "train", "walk", "other"]
+
+_TIME_RE = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class StopBase(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    location: str = Field(min_length=1, max_length=200)
+    start_date: date
+    end_date: date
+    transport_mode: Literal["car", "plane", "train", "walk", "other"] = "car"
+    departure_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
+    arrival_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
+    km_from_prev: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("end_date")
+    @classmethod
+    def _end_after_start(cls, v, info):
+        start = info.data.get("start_date")
+        if start and v < start:
+            raise ValueError("end_date must be greater than or equal to start_date")
+        return v
+
+
+class StopCreate(StopBase):
+    pass
+
+
+class StopUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    location: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    transport_mode: Optional[Literal["car", "plane", "train", "walk", "other"]] = None
+    departure_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
+    arrival_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
+    km_from_prev: Optional[float] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+
+class Stop(StopBase):
+    model_config = ConfigDict(extra="ignore")
+    stop_id: str
+    trip_id: str
+    order: int
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ReorderStops(BaseModel):
+    stop_ids: List[str] = Field(min_length=1)
+
+
+# ─────────────────────────────────────────────────────────────
+# ATTRACTION (Phase 2)
+# ─────────────────────────────────────────────────────────────
+class AttractionBase(BaseModel):
+    name: str = Field(min_length=1, max_length=140)
+    cost: Optional[float] = Field(default=None, ge=0)
+    currency: Optional[str] = None
+    booking_link: Optional[str] = Field(default=None, max_length=500)
+    scheduled_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
+    duration_min: Optional[int] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("currency")
+    @classmethod
+    def _cur(cls, v):
+        if v is None:
+            return v
+        v = v.upper()
+        if v not in SUPPORTED_CURRENCIES:
+            raise ValueError(f"currency must be one of {SUPPORTED_CURRENCIES}")
+        return v
+
+    @field_validator("booking_link")
+    @classmethod
+    def _link_scheme(cls, v):
+        if v is None or v == "":
+            return v
+        v = v.strip()
+        low = v.lower()
+        if not (low.startswith("http://") or low.startswith("https://")):
+            raise ValueError("booking_link must start with http:// or https://")
+        return v
+
+
+class AttractionCreate(AttractionBase):
+    pass
+
+
+class AttractionUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=140)
+    cost: Optional[float] = Field(default=None, ge=0)
+    currency: Optional[str] = None
+    booking_link: Optional[str] = Field(default=None, max_length=500)
+    scheduled_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
+    duration_min: Optional[int] = Field(default=None, ge=0)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @field_validator("currency")
+    @classmethod
+    def _cur(cls, v):
+        if v is None:
+            return v
+        v = v.upper()
+        if v not in SUPPORTED_CURRENCIES:
+            raise ValueError(f"currency must be one of {SUPPORTED_CURRENCIES}")
+        return v
+
+    @field_validator("booking_link")
+    @classmethod
+    def _link_scheme(cls, v):
+        if v is None or v == "":
+            return v
+        v = v.strip()
+        low = v.lower()
+        if not (low.startswith("http://") or low.startswith("https://")):
+            raise ValueError("booking_link must start with http:// or https://")
+        return v
+
+
+class Attraction(AttractionBase):
+    model_config = ConfigDict(extra="ignore")
+    attraction_id: str
+    trip_id: str
+    stop_id: str
+    order: int
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class AttractionMove(BaseModel):
+    attraction_id: str
+    target_stop_id: str
+    new_order: int = Field(ge=0)
+
+
+class ReorderAttractions(BaseModel):
+    moves: List[AttractionMove] = Field(min_length=1)
+
+
+# ─────────────────────────────────────────────────────────────
+# FUTURE SCHEMAS — NOT EXPOSED YET (Phase 3+)
+# ─────────────────────────────────────────────────────────────
 #
 # class Hotel(BaseModel):
 #     hotel_id: str
@@ -151,11 +271,11 @@ class TripMember(BaseModel):
 #     expense_id: str
 #     trip_id: str
 #     stop_id: Optional[str] = None
-#     category: str  # "transport", "food", "lodging", "attraction", "other"
+#     category: str
 #     amount: float
 #     currency: str
 #     amount_in_home_currency: float
-#     paid_by: str  # user_id
+#     paid_by: str
 #     description: Optional[str] = None
 #     occurred_at: datetime
 #     created_at: datetime

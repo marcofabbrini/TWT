@@ -35,4 +35,14 @@ async def ensure_indexes() -> None:
     await db.trip_members.create_index("user_id")
     await db.trip_members.create_index("invited_email")
 
+    # stops (Phase 2)
+    await db.stops.create_index("stop_id", unique=True)
+    await db.stops.create_index([("trip_id", ASCENDING), ("order", ASCENDING)])
+
+    # attractions (Phase 2)
+    await db.attractions.create_index("attraction_id", unique=True)
+    await db.attractions.create_index(
+        [("trip_id", ASCENDING), ("stop_id", ASCENDING), ("order", ASCENDING)]
+    )
+
     logger.info("MongoDB indexes ensured")

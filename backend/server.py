@@ -20,6 +20,8 @@ logger = logging.getLogger("twt")
 from db import db, client, ensure_indexes  # noqa: E402
 from auth import router as auth_router  # noqa: E402
 from trips import router as trips_router  # noqa: E402
+from stops import router as stops_router  # noqa: E402
+from attractions import stop_router as attractions_stop_router, trip_router as attractions_trip_router  # noqa: E402
 
 app = FastAPI(
     title="TWT — Trip Without Trap",
@@ -44,6 +46,9 @@ async def health():
 
 api_router.include_router(auth_router)
 api_router.include_router(trips_router)
+api_router.include_router(stops_router)
+api_router.include_router(attractions_stop_router)
+api_router.include_router(attractions_trip_router)
 app.include_router(api_router)
 
 # CORS — allow credentials so the httpOnly cookie flows in cross-origin requests.
