@@ -10,7 +10,7 @@ module.exports = {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        display: ['"Sniglet"', "ui-rounded", "system-ui", "sans-serif"],
+        display: ['"Nunito"', "ui-rounded", "system-ui", "sans-serif"],
         sans: ['"Sniglet"', "ui-rounded", "ui-sans-serif", "system-ui", "sans-serif"],
         nunito: ['"Nunito"', "ui-rounded", "system-ui", "sans-serif"],
       },
