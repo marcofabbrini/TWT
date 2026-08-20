@@ -33,6 +33,7 @@ const empty = {
   departure_time: "",
   arrival_time: "",
   km_from_prev: "",
+  km_manual_override: false,
   notes: "",
 };
 
@@ -63,6 +64,7 @@ export default function StopModal({
           editingStop.km_from_prev === null || editingStop.km_from_prev === undefined
             ? ""
             : String(editingStop.km_from_prev),
+        km_manual_override: !!editingStop.km_manual_override,
         notes: editingStop.notes || "",
       });
     } else {
@@ -102,6 +104,7 @@ export default function StopModal({
       departure_time: form.departure_time || null,
       arrival_time: form.arrival_time || null,
       km_from_prev: form.km_from_prev === "" ? null : Number(form.km_from_prev),
+      km_manual_override: !!form.km_manual_override,
       notes: form.notes || null,
     };
 
@@ -258,12 +261,25 @@ export default function StopModal({
                 step="0.1"
                 value={form.km_from_prev}
                 onChange={(e) => update("km_from_prev", e.target.value)}
-                placeholder="0"
+                placeholder="auto"
                 className="bg-white/[0.03] border-white/10 focus-visible:ring-twt-teal/40 tabular-nums"
                 data-testid="stop-km-input"
               />
             </div>
           </div>
+          <label
+            className="flex items-center gap-2 text-xs text-twt-muted cursor-pointer"
+            data-testid="stop-km-manual-label"
+          >
+            <input
+              type="checkbox"
+              checked={!!form.km_manual_override}
+              onChange={(e) => update("km_manual_override", e.target.checked)}
+              className="accent-twt-teal"
+              data-testid="stop-km-manual-toggle"
+            />
+            Override auto-calc — keep my manual km even after reorders
+          </label>
           <div className="space-y-1.5">
             <Label className="text-twt-muted text-xs uppercase tracking-widest">Notes</Label>
             <Textarea

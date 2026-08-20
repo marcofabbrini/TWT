@@ -74,6 +74,13 @@ class TripCreate(BaseModel):
         return v
 
 
+class TripUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    cover_image_url: Optional[str] = None
+
+
 class Trip(BaseModel):
     model_config = ConfigDict(extra="ignore")
     trip_id: str
@@ -122,6 +129,8 @@ class StopBase(BaseModel):
     departure_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
     arrival_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
     km_from_prev: Optional[float] = Field(default=None, ge=0)
+    km_manual_override: bool = False
+    km_calc_error: bool = False
     notes: Optional[str] = Field(default=None, max_length=2000)
 
     @field_validator("end_date")
@@ -146,6 +155,7 @@ class StopUpdate(BaseModel):
     departure_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
     arrival_time: Optional[str] = Field(default=None, pattern=_TIME_RE)
     km_from_prev: Optional[float] = Field(default=None, ge=0)
+    km_manual_override: Optional[bool] = None
     notes: Optional[str] = Field(default=None, max_length=2000)
 
 

@@ -62,10 +62,12 @@ class TestHealth:
         assert r.status_code == 200
         paths = r.json()["paths"]
         assert "/api/trips" in paths
-        # currency immutability: no PATCH on trip
+        # currency immutability: PATCH exists since Phase 5 but never accepts home_currency
         trip_path = paths.get("/api/trips/{trip_id}", {})
-        assert "patch" not in trip_path
+        assert "patch" in trip_path
         assert "put" not in trip_path
+        patch_props = (r.json()["components"]["schemas"]["TripUpdate"]["properties"])
+        assert "home_currency" not in patch_props
 
     def test_root(self):
         r = requests.get(f"{API}/")
@@ -247,6 +249,10 @@ class TestTrips:
             "start_date": "2026-08-01", "end_date": "2026-08-03"})
         tid = r.json()["trip_id"]
         created_trip_ids.append(tid)
+        # Phase 5: PATCH exists (owner-only) but home_currency stays immutable
+        # because TripUpdate has no home_currency field (extra keys ignored).
         p = s.patch(f"{API}/trips/{tid}", json={"home_currency": "USD"})
-        assert p.status_code in (404, 405)
+        assert p.status_code == 200, f"{p.status_code} {p.text[:200]}"
+        assert p.json()["home_currency"] == "JPY"
+        assert s.get(f"{API}/trips/{tid}").json()["home_currency"] == "JPY"
         assert s.get(f"{API}/trips/{tid}").json()["home_currency"] == "JPY"

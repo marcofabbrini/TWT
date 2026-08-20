@@ -58,6 +58,14 @@ Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) 
 - Dashboard: glass trip cards, empty state, create modal, delete confirmation.
 - Landing hero + feature grid.
 
+### Phase 5 (2026-02, verified 211/211 backend + all frontend)
+- Trip PATCH (owner only): title, dates, cover. `home_currency` is not in the update model → truly immutable. Date changes are refused with 422 + `stops_out_of_range` list if any stop would fall outside the new range.
+- KM auto-calc via **OpenRouteService**: geocode + directions for car/walk (train uses driving-car fallback), Haversine for plane. Cached geocoding (30d TTL). ORS_MOCK=1 provides deterministic pairs for tests. Graceful fallback to null on missing key / timeout — never blocks a mutation.
+- Triggers: recompute on stop create, on location/transport change, and on reorder (whole trip). `km_manual_override=true` freezes user-provided value.
+- `POST /trips/{id}/recompute-km` (editor+) forces a full trip refresh; response `{updated_count, errors[]}`.
+- `GET /trips/{id}/summary.total_km` now aggregates real km.
+- Cancellation-deadline alerts: `GET /notifications/cancellation-alerts` aggregates hotels across all user's trips with deadline ≤ 7 days (or past) with severity red/yellow. Dashboard `<NotificationsBell/>` with badge + popover linking to each trip. `<HotelList/>` shows an inline red/yellow/green DeadlineBadge with a steady scale pulse on red.
+
 ### Phase 4 (2026-02, verified 181/181 backend + all frontend)
 - Members mgmt: `POST /trips/{id}/invites` (owner-only, generates share link), `GET/POST/decline /invites/{token}` public accept flow with email match.
 - Roles enforced everywhere: viewer read-only, editor CRUD but no members/rates/delete-trip, owner full access. `require_role` returns 403 for member-without-perm, 404 for non-member.

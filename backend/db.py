@@ -69,4 +69,8 @@ async def ensure_indexes() -> None:
     # trip_members Phase 4 additions
     await db.trip_members.create_index("invite_token", sparse=True, unique=True)
 
+    # geocode_cache (Phase 5) — 30 day TTL
+    await db.geocode_cache.create_index("key", unique=True)
+    await db.geocode_cache.create_index("cached_at", expireAfterSeconds=60 * 60 * 24 * 30)
+
     logger.info("MongoDB indexes ensured")

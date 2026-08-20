@@ -1,0 +1,52 @@
+{
+  "summary": "Phase 5 full test pass. Backend: added /app/backend/tests/phase5_test.py (24 tests) covering Trip PATCH (owner-only, currency immutability, date validation + stops_out_of_range 422, version bump, 401/404), KM auto-calc under ORS_MOCK=1 (Roma→Milano 574, Milano→Firenze plane 249.5, Roma→Napoli 225, London→Paris 460, Lisbon→Sintra 30, unknown city null, mode 'other' null, recalc on PATCH location/transport_mode, recalc on reorder, manual_override survives reorder + recompute), POST /trips/{id}/recompute-km (owner/editor 200, viewer 403, payload shape), GET /notifications/cancellation-alerts (auth, window (-inf, +7d], severity red<=3 incl. negative, yellow 4-7, sorting, field set, membership isolation), and OpenAPI. Full regression: 202/205 passed (2 obsolete Phase-1 tests in backend_test.py updated by me; 3 remaining failures are real defects). Frontend: verified NotificationsBell (badge=3, popover items, links to /trip/{id}, green 30d correctly excluded), Trip sub-header KM total ('1573+ km' with null leg, '1981 km' without), KmChip values + 'manual' lock chip, EditTripModal (currency locked/disabled, valid save updates header title without reload, 422 out-of-range banner + itemized stop list), owner-only Pencil (viewer sees 0), stop create → km chip appears via trip-sync refetch. Found 1 high-priority UI bug: RED DeadlineBadges render with computed opacity 0 (invisible).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET/POST /api/trips/{id}/stops", "issue": "`km_calc_error` is written to Mongo but is NOT a field on models.Stop, so it is never returned by the API. Spec requires km_calc_error=true for unresolvable locations; frontend therefore cannot distinguish 'not computed' from 'error'. Add km_calc_error: bool = False to StopBase/Stop."},
+      {"endpoint": "POST /api/trips/{id}/stops", "issue": "Response is built from the pre-insert dict, so km_from_prev is always null even though recompute_stop_km() already stored the value (e.g. Roma→Milano returns null instead of 574). Re-read the doc after recompute before returning. Currently masked in UI only because trip-sync polling refetches."},
+      {"endpoint": "GET /api/trips/{id}/summary", "issue": "total_km is still hardcoded to None ('# Phase 5') even though per-stop km now exists; UI shows 'KM total: —' next to a working '1981 km' chip in the same sub-header."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "HotelList / DeadlineBadge", "issue": "RED badges (deadline <=3d and expired) are INVISIBLE: computed opacity = 0. Root cause: the pulse spread `{...(severity==='red' ? {animate:{scale:[1,1.06,1]}, transition:{...}} : {})}` overrides the earlier `animate={{scale:1, opacity:1}}`, so the element stays at initial opacity 0. Fix by merging opacity:1 into the pulse animate object. Yellow (In 5d) and green (In 30d) badges render fine.", "selector": "[data-testid=\"hotel-deadline-badge\"]", "priority": "HIGH"},
+      {"component": "HotelList / DeadlineBadge", "issue": "All hotel badges share the same static testid 'hotel-deadline-badge'; should be per-hotel (e.g. hotel-deadline-badge-{hotel_id}) for reliable assertions.", "selector": "[data-testid=\"hotel-deadline-badge\"]", "priority": "LOW"},
+      {"component": "TripCard (dashboard)", "issue": "Hardcoded placeholders '0 km', '0 {currency}' and a 'phase 1' tag, even though the trip has 1981 km and €480 of costs.", "selector": "[data-testid^=\"trip-card\"]", "priority": "MEDIUM"},
+      {"component": "TripTotals", "issue": "'KM total: —' hardcoded dash (summary.total_km null) shown right beside the working km-total chip — duplicated/contradictory info in the sub-header.", "selector": "[data-testid=\"km-total\"]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "EditTripModal / StopModal", "issues": ["Date fields use the browser-native <input type=date> picker instead of the shadcn calendar component used elsewhere in the design system"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/phase5_test.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/seed_ui_p5.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "HIGH: fix invisible red DeadlineBadge (merge opacity:1 into the red pulse animate object in HotelList.jsx)",
+    "Add km_calc_error to models.StopBase/Stop so the API exposes it",
+    "Return the recomputed km in the POST /stops response (re-read doc after recompute_stop_km)",
+    "Implement summary.total_km (sum of km_from_prev) and wire TripTotals + TripCard to real km/cost values"
+  ],
+  "critical_code_review_comments": [
+    "trips.py PATCH: `updates.get('start_date') or trip['start_date']` silently ignores an explicit null; acceptable today but use `'start_date' in updates` for clarity.",
+    "notifications.py cancellation_alerts: per-hotel stop lookups are cached, fine; but hotels of soft-deleted/other statuses are not filtered — only 'accepted' membership is, which is correct.",
+    "distance.py mock road table lookup happens before geocode; unknown-city path correctly returns None and sets km_calc_error in Mongo (just not exposed by the API)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/phase5_test.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/seed_ui_p5.py"
+  ],
+  "success_rate": {"backend": "98.5% (202/205; 3 failures = 2 real defects)", "frontend": "92% (1 high-priority visual bug)"},
+  "seed_data_creation": "phase5_test.py creates disposable dev-login users (p5*@twt.app) and TEST_ prefixed trips/stops/hotels. UI seed: /app/test_reports/seed_ui_p5.py -> /app/test_reports/p5_ui_seed.json (user p5ui_0a57a1@twt.app, trip_b7b3037ee9b0456c with Roma/Milano/Firenze(manual 999) stops + 4 hotels: +2d red, +5d yellow, +30d green, -4d expired).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "dev-login (/api/auth/dev-login) and dev-login-as; see /app/memory/test_credentials.md. UI seed user in /app/test_reports/p5_ui_seed.json",
+  "context_for_next_testing_agent": "Run `python -m pytest tests/ -q` from /app/backend (205 tests). Two Phase-1 tests in backend_test.py (test_no_patch_route, test_openapi) were rewritten for Phase 5 (PATCH now exists; immutability asserted via TripUpdate schema having no home_currency). The 3 known failures in phase5_test.py map 1:1 to the two backend defects (km_calc_error not in Stop model; stale km in POST /stops response) — they should pass once fixed. For UI re-test, re-run /app/test_reports/seed_ui_p5.py (deadlines are relative to today) and log in from the page with fetch('/api/auth/dev-login'). Verify red badge computed opacity == 1 via getComputedStyle.",
+  "rca_of_the_issue": "Red DeadlineBadge invisibility: framer-motion props are spread after `animate={{scale:1, opacity:1}}`, and the red-severity spread supplies its own `animate` object without opacity, replacing the original animate target; the element therefore remains at `initial.opacity = 0`. Verified via getComputedStyle -> opacity '0' for 'In 2d' and 'Expired 4d ago' badges while yellow/green report '1'."
+}

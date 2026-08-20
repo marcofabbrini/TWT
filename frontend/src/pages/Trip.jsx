@@ -12,6 +12,10 @@ import {
   Compass,
   Coins,
   Users,
+  Pencil,
+  Route,
+  RefreshCw,
+  Lock,
 } from "lucide-react";
 import { DndContext, closestCorners, DragOverlay } from "@dnd-kit/core";
 
@@ -27,6 +31,7 @@ import ExchangeRatesDialog from "@/components/ExchangeRatesDialog";
 import TripTotals from "@/components/TripTotals";
 import ConfirmDeleteDialog from "@/components/ConfirmDeleteDialog";
 import MembersDialog from "@/components/MembersDialog";
+import EditTripModal from "@/components/EditTripModal";
 import useDndReorder from "@/hooks/useDndReorder";
 import useTripSync from "@/hooks/useTripSync";
 import useTripPresence from "@/hooks/useTripPresence";
@@ -77,6 +82,7 @@ export default function Trip() {
   const [expenseModal, setExpenseModal] = useState({ open: false, editing: null });
   const [ratesOpen, setRatesOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
+  const [editTripOpen, setEditTripOpen] = useState(false);
   const [pendingStopDelete, setPendingStopDelete] = useState(null);
   const [pendingAttrDelete, setPendingAttrDelete] = useState(null);
   const [pendingHotelDelete, setPendingHotelDelete] = useState(null);
@@ -359,6 +365,17 @@ export default function Trip() {
           </span>
           <TripTotals summary={summary} onOpenRates={() => setRatesOpen(true)} />
           <PresencePod presence={presence} meId={me?.user_id} />
+          {isOwner && (
+            <button
+              type="button"
+              onClick={() => setEditTripOpen(true)}
+              className="p-2 rounded-lg hover:bg-white/5 text-twt-muted hover:text-twt-teal transition"
+              data-testid="edit-trip-btn"
+              aria-label="Edit trip"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setMembersOpen(true)}
@@ -399,7 +416,7 @@ export default function Trip() {
               <div className="space-y-8">
                 {stops.map((s, idx) => (
                   <React.Fragment key={s.stop_id}>
-                    {idx > 0 && <KmChip km={s.km_from_prev} transport={s.transport_mode} />}
+                    {idx > 0 && <KmChip km={s.km_from_prev} transport={s.transport_mode} manual={s.km_manual_override} />}
                     <StopCard
                       stop={s}
                       index={idx}
@@ -502,6 +519,12 @@ export default function Trip() {
         isOwner={isOwner}
         onChanged={refreshSummary}
       />
+      <EditTripModal
+        open={editTripOpen}
+        onOpenChange={setEditTripOpen}
+        trip={trip}
+        onSaved={(updated) => setTrip((prev) => ({ ...prev, ...updated }))}
+      />
       <MembersDialog
         open={membersOpen}
         onOpenChange={setMembersOpen}
@@ -560,14 +583,27 @@ export default function Trip() {
   );
 }
 
-function KmChip({ km, transport }) {
+function KmChip({ km, transport, manual }) {
   const { Icon } = transportOf(transport);
   return (
     <div className="pl-2 -my-2 flex items-center gap-2 text-[11px] text-twt-muted">
       <span className="w-1.5 h-1.5 rounded-full bg-twt-teal/60" />
-      <span className="glass rounded-full px-2.5 py-1 inline-flex items-center gap-1.5">
+      <span
+        className="glass rounded-full px-2.5 py-1 inline-flex items-center gap-1.5"
+        title={km == null ? "Not calculated — edit the stop location or trigger recompute" : undefined}
+        data-testid="km-chip"
+      >
         <Icon className="w-3 h-3 text-twt-teal" />
         <span className="tabular-nums">{km != null ? `${km} km` : "— km"}</span>
+        {manual && (
+          <span
+            className="inline-flex items-center gap-0.5 text-[9px] uppercase tracking-widest text-twt-amber ml-1"
+            data-testid="km-chip-manual"
+          >
+            <Lock className="w-2.5 h-2.5" />
+            manual
+          </span>
+        )}
       </span>
     </div>
   );

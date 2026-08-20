@@ -20,6 +20,11 @@ function fmtCost(v, currency) {
   }
 }
 
+function fmtKmTotal(v) {
+  if (v == null) return "—";
+  return `${Math.round(v)} km`;
+}
+
 export default function TripTotals({ summary, onOpenRates }) {
   if (!summary) {
     return (
@@ -40,9 +45,10 @@ export default function TripTotals({ summary, onOpenRates }) {
 
   return (
     <div className="hidden md:flex items-center gap-4 text-xs text-twt-muted" data-testid="trip-totals">
-      <span className="inline-flex items-center gap-1.5">
+      <span className="inline-flex items-center gap-1.5 tabular-nums" data-testid="trip-km-total">
         <Route className="w-3.5 h-3.5 text-twt-teal" />
-        KM total: <span className="text-twt-text/70">—</span>
+        KM total:
+        <span className="text-twt-text/70">{fmtKmTotal(summary.total_km)}</span>
       </span>
       <span
         className="inline-flex items-center gap-1.5 tabular-nums"

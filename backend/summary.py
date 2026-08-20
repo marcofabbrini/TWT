@@ -19,6 +19,13 @@ async def trip_summary(trip_id: str, current_user: dict = Depends(require_auth))
     trip = await get_trip_or_404(trip_id)
     home_currency = trip["home_currency"]
 
+    # Sum of km_from_prev across all stops (Phase 5).
+    km_docs = await db.stops.find(
+        {"trip_id": trip_id, "km_from_prev": {"$ne": None}},
+        {"_id": 0, "km_from_prev": 1},
+    ).to_list(2000)
+    total_km_val = round(sum(d["km_from_prev"] for d in km_docs), 1) if km_docs else None
+
     # Load rates map for this trip.
     rates_docs = await db.exchange_rates.find({"trip_id": trip_id}, {"_id": 0}).to_list(500)
     rates = {(r["from_currency"], r["to_currency"]): r["rate"] for r in rates_docs}
@@ -73,7 +80,7 @@ async def trip_summary(trip_id: str, current_user: dict = Depends(require_auth))
     ]
 
     return {
-        "total_km": None,  # Phase 5
+        "total_km": total_km_val,
         "total_cost_home_currency": total,
         "home_currency": home_currency,
         "breakdown": breakdown,

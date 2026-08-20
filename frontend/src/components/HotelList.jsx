@@ -1,6 +1,6 @@
 import React from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Hotel, Plus, Pencil, Trash2, ExternalLink, CalendarClock } from "lucide-react";
+import { Hotel, Plus, Pencil, Trash2, ExternalLink, CalendarClock, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 
 function fmtCost(cost, currency) {
   if (cost === null || cost === undefined) return null;
@@ -18,6 +18,46 @@ function fmtCost(cost, currency) {
 function fmtDate(iso) {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString("en-US", { day: "numeric", month: "short" });
+}
+
+function DeadlineBadge({ iso }) {
+  if (!iso) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const d = new Date(iso); d.setHours(0, 0, 0, 0);
+  const days = Math.round((d - today) / 86400000);
+  let severity = "green"; // >7
+  if (days < 0 || days <= 3) severity = "red";
+  else if (days <= 7) severity = "yellow";
+  const label = days < 0 ? `Expired ${-days}d ago` : days === 0 ? "Today" : `In ${days}d`;
+  const cls = severity === "red"
+    ? "bg-twt-rose/15 text-twt-rose border-twt-rose/30"
+    : severity === "yellow"
+      ? "bg-twt-amber/15 text-twt-amber border-twt-amber/30"
+      : "bg-twt-teal/12 text-twt-teal border-twt-teal/25";
+  const Icon = severity === "red" ? AlertTriangle : severity === "yellow" ? Clock : CheckCircle2;
+  return (
+    <motion.span
+      initial={{ scale: 0.9, opacity: 0 }}
+      animate={
+        severity === "red"
+          ? { scale: [1, 1.06, 1], opacity: 1 }
+          : { scale: 1, opacity: 1 }
+      }
+      transition={
+        severity === "red"
+          ? {
+              scale: { duration: 1.6, repeat: Infinity },
+              opacity: { duration: 0.25 },
+            }
+          : { duration: 0.25 }
+      }
+      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${cls}`}
+      data-testid="hotel-deadline-badge"
+    >
+      <Icon className="w-3 h-3" />
+      {label}
+    </motion.span>
+  );
 }
 
 export default function HotelList({
@@ -67,9 +107,12 @@ export default function HotelList({
                   </span>
                   {h.location && <span>· {h.location}</span>}
                   {h.cancellation_deadline && (
-                    <span className="inline-flex items-center gap-1 text-twt-teal">
-                      <CalendarClock className="w-3 h-3" />
-                      cancel by {fmtDate(h.cancellation_deadline)}
+                    <span className="inline-flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1 text-twt-teal">
+                        <CalendarClock className="w-3 h-3" />
+                        cancel by {fmtDate(h.cancellation_deadline)}
+                      </span>
+                      <DeadlineBadge iso={h.cancellation_deadline} />
                     </span>
                   )}
                   {h.booking_link && (

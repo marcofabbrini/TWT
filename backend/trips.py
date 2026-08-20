@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from db import db
-from models import Trip, TripCreate, TripWithRole, utcnow, new_id
+from models import Trip, TripCreate, TripUpdate, TripWithRole, utcnow, new_id
 from auth import require_auth
 from versioning import bump_version
 
@@ -105,6 +105,70 @@ async def get_trip(trip_id: str, current_user: dict = Depends(require_auth)):
     s = _serialize_trip(trip_doc)
     s["role"] = membership["role"]
     return TripWithRole(**s)
+
+
+@router.patch("/{trip_id}", response_model=Trip)
+async def update_trip(
+    trip_id: str,
+    body: TripUpdate,
+    current_user: dict = Depends(require_auth),
+):
+    trip = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if trip["owner_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Only the owner can edit the trip")
+
+    updates = body.model_dump(exclude_unset=True)
+    if not updates:
+        return Trip(**_serialize_trip(trip))
+
+    # Effective start/end for validation.
+    from datetime import date as _date
+    def _to_date(v):
+        return _date.fromisoformat(v) if isinstance(v, str) else v
+
+    eff_start = _to_date(updates.get("start_date") or trip["start_date"])
+    eff_end = _to_date(updates.get("end_date") or trip["end_date"])
+    if eff_end < eff_start:
+        raise HTTPException(status_code=422, detail="end_date must be >= start_date")
+
+    # If dates changed, ensure no stop falls outside the new range.
+    if "start_date" in updates or "end_date" in updates:
+        stops = await db.stops.find(
+            {"trip_id": trip_id},
+            {"_id": 0, "stop_id": 1, "title": 1, "start_date": 1, "end_date": 1},
+        ).to_list(2000)
+        out_of_range = []
+        for s in stops:
+            ss = _to_date(s["start_date"])
+            se = _to_date(s["end_date"])
+            if ss < eff_start or se > eff_end:
+                out_of_range.append({"stop_id": s["stop_id"], "title": s["title"]})
+        if out_of_range:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Some stops fall outside the new trip range",
+                    "stops_out_of_range": out_of_range,
+                    "new_range": {"start": eff_start.isoformat(), "end": eff_end.isoformat()},
+                },
+            )
+
+    # Serialize dates for storage.
+    for k in ("start_date", "end_date"):
+        if k in updates and hasattr(updates[k], "isoformat"):
+            updates[k] = updates[k].isoformat()
+    updates["updated_at"] = utcnow().isoformat()
+    if "title" in updates and updates["title"]:
+        updates["title"] = updates["title"].strip()
+
+    await db.trips.update_one({"trip_id": trip_id}, {"$set": updates})
+    await bump_version(trip_id, current_user["user_id"])
+    logger.info("trips.update trip_id=%s by=%s fields=%s", trip_id, current_user["user_id"], list(updates.keys()))
+    doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    return Trip(**_serialize_trip(doc))
+
 
 
 @router.delete("/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)

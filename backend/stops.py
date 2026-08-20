@@ -11,6 +11,7 @@ from auth import require_auth
 from models import Stop, StopCreate, StopUpdate, ReorderStops, utcnow, new_id
 from permissions import get_trip_or_404, require_role, trip_date_range
 from versioning import bump_version
+from services.distance import recompute_stop_km, recompute_trip_km
 
 logger = logging.getLogger("twt.stops")
 router = APIRouter(prefix="/trips/{trip_id}/stops", tags=["stops"])
@@ -68,12 +69,18 @@ async def create_stop(trip_id: str, body: StopCreate, current_user: dict = Depen
         "departure_time": body.departure_time,
         "arrival_time": body.arrival_time,
         "km_from_prev": body.km_from_prev,
+        "km_manual_override": bool(body.km_manual_override),
+        "km_calc_error": False,
         "notes": body.notes,
         "created_at": utcnow().isoformat(),
         "updated_at": utcnow().isoformat(),
     }
     await db.stops.insert_one(doc)
+    if not doc["km_manual_override"]:
+        await recompute_stop_km(trip_id, doc["stop_id"])
     await bump_version(trip_id, current_user["user_id"])
+    # Re-read to include the recomputed km_from_prev / km_calc_error.
+    doc = await db.stops.find_one({"stop_id": doc["stop_id"]}, {"_id": 0})
     logger.info("stops.create trip=%s stop=%s", trip_id, doc["stop_id"])
     return Stop(**_serialize(doc))
 
@@ -111,6 +118,22 @@ async def update_stop(
 
     updates["updated_at"] = utcnow().isoformat()
     await db.stops.update_one({"stop_id": stop_id}, {"$set": updates})
+
+    # Recompute km if inputs relevant to routing changed (unless manual override is set).
+    doc = await db.stops.find_one({"stop_id": stop_id}, {"_id": 0})
+    triggers = {"location", "transport_mode", "km_manual_override"}
+    if triggers & set(updates.keys()) and not doc.get("km_manual_override"):
+        await recompute_stop_km(trip_id, stop_id)
+        # Also recompute the NEXT stop since its "from" changed if this stop's location changed.
+        if "location" in updates:
+            next_stop = await db.stops.find_one(
+                {"trip_id": trip_id, "order": {"$gt": doc["order"]}},
+                {"_id": 0, "stop_id": 1},
+                sort=[("order", 1)],
+            )
+            if next_stop:
+                await recompute_stop_km(trip_id, next_stop["stop_id"])
+
     await bump_version(trip_id, current_user["user_id"])
     doc = await db.stops.find_one({"stop_id": stop_id}, {"_id": 0})
     return Stop(**_serialize(doc))
@@ -140,6 +163,9 @@ async def delete_stop(trip_id: str, stop_id: str, current_user: dict = Depends(r
     ]
     if ops:
         await db.stops.bulk_write(ops, ordered=False)
+
+    # After a stop is removed, the next stop's "prev" changed — recompute.
+    await recompute_trip_km(trip_id)
 
     await bump_version(trip_id, current_user["user_id"])
     logger.info("stops.delete trip=%s stop=%s", trip_id, stop_id)
@@ -178,6 +204,9 @@ async def reorder_stops(
     result = await db.stops.bulk_write(ops, ordered=True)
     if result.matched_count != len(body.stop_ids):
         raise HTTPException(status_code=500, detail="Partial reorder failure")
+
+    # Reorder shifts every stop's predecessor — recompute km for the whole trip.
+    await recompute_trip_km(trip_id)
 
     await bump_version(trip_id, current_user["user_id"])
     docs = await db.stops.find({"trip_id": trip_id}, {"_id": 0}).sort("order", ASCENDING).to_list(500)

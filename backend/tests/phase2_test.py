@@ -143,7 +143,9 @@ class TestStopsCreate:
         assert s1["end_date"] == "2030-06-03"
         assert s1["transport_mode"] == "car"
         assert s1["departure_time"] == "08:30"
-        assert s1["km_from_prev"] == 12.5
+        # Phase 5: km is auto-computed unless km_manual_override=True. The first
+        # stop has no predecessor, so the supplied km_from_prev is discarded.
+        assert s1["km_from_prev"] is None
         assert s1["notes"] == "n1"
         base_order = s1["order"]
 

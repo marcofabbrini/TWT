@@ -1,0 +1,40 @@
+{
+  "summary": "TWT Phase 5 final micro-retest. (1) RED DeadlineBadge opacity fix VERIFIED: sampled getComputedStyle(...).opacity 12x over ~2.4s on all 4 seeded badges ('In 2d' red, 'In 5d' yellow, 'In 30d' green, 'Expired 4d ago' red) — all constant at 1.0 (min=1.0, max=1.0), min >> 0.9. Scale pulse still alive on red badges only (9 distinct transform values over 1.8s vs 1 for yellow/green), so the per-prop transition split works as intended. (2) Dead KmTotal removal VERIFIED: [data-testid=km-total] count = 0 on the trip page, while [data-testid=trip-km-total] renders 'KM total: 1573 km' correctly (matches /api/trips/{id}/summary total_km=1573.0). (3) Backend regression suite fully green: 211 passed / 0 failed in 42s. Phase 5 acceptance criteria met. One pre-existing (unrelated to this phase) cosmetic defect found on the Dashboard trip card.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TripCard.jsx (lines ~105-110)", "issue": "Dashboard trip card renders hardcoded placeholders '0 km', '0 {home_currency}' and 'phase 1' instead of real totals. For the seeded trip the card shows '0 km / 0 EUR' while the trip page + /api/trips/{id}/summary report 1573 km / EUR 480 — misleading data for the user. /api/trips list does not return totals, so either enrich the list response or fetch summary per card.", "selector": "[data-testid^=\"trip-title-\"] card footer", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/phase2_test.py",
+    "/app/backend/tests/phase3_test.py",
+    "/app/backend/tests/phase4_test.py",
+    "/app/backend/tests/phase5_test.py",
+    "/app/backend/tests/phase5b_test.py",
+    "/app/test_reports/pytest/pytest_results_iter13.xml",
+    "/app/test_reports/seed_ui_p5.py"
+  ],
+  "action_items": [
+    "Optional (out of Phase 5 scope): replace hardcoded '0 km' / '0 {currency}' / 'phase 1' placeholders in TripCard.jsx with real trip totals (extend /api/trips list payload with total_km + total_cost_home_currency, or lazily fetch summary per card)."
+  ],
+  "critical_code_review_comments": [
+    "HotelList.jsx DeadlineBadge: per-prop transition split (scale repeat:Infinity, opacity one-shot 0.25s) is the correct Framer Motion fix — no keyframe array on opacity, so no dip. Verified empirically.",
+    "Trip.jsx no longer contains the unused KmTotal function; no other reference to data-testid=km-total remains anywhere in /app/frontend/src.",
+    "TripCard.jsx placeholders are dead/faked UI data — should be wired or removed to avoid the same 'dead component' class of issue just cleaned up in Trip.jsx."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (211/211)", "frontend": "100% on the 2 targeted Phase 5 checks (badge opacity, km-total removal)"},
+  "seed_data_creation": "Ran /app/test_reports/seed_ui_p5.py -> user p5ui_a9e31e@twt.app, trip_dbe33da479494bf2 with 4 stops (Roma/Milano/Firenze/Unknown) and 4 hotels covering red(2d), yellow(5d), green(30d), expired(-4d) deadlines. Written to /app/test_reports/p5_ui_seed.json.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "dev-login: POST /api/auth/dev-login {email} — in browser use fetch with credentials:'include' to set the twt_session cookie, then navigate to /trip/{trip_id} (note: route is /trip/{id}, NOT /trips/{id} — /trips/{id} redirects to /dashboard).",
+  "context_for_next_testing_agent": "Phase 5 is fully verified: red badge opacity constant 1.0 with scale pulse intact, km-total dead component gone, backend 211/211 green. Trip page route is /trip/{trip_id}; hotels render expanded by default (no stop click needed). Only open item is the cosmetic hardcoded '0 km / 0 EUR / phase 1' footer in TripCard.jsx on the dashboard.",
+  "rca_of_the_issue": "Previous red-badge flicker was caused by a single shared transition (repeat:Infinity) applied to both scale and opacity, making Framer Motion loop the opacity 0->1 entry animation as well. Splitting transitions per property (opacity one-shot 0.25s) confines the repeat to scale only. Confirmed by measurement: opacity stays 1.0 while transform keeps changing."
+}

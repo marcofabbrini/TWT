@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LogOut, User as UserIcon, Compass } from "lucide-react";
+import NotificationsBell from "@/components/NotificationsBell";
 
 function Avatar({ user }) {
   const initial = (user?.name || user?.email || "?").trim().charAt(0).toUpperCase();
@@ -62,7 +63,9 @@ export default function Header() {
         </Link>
 
         {user ? (
-          <DropdownMenu>
+          <div className="flex items-center gap-2">
+            <NotificationsBell />
+            <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 className="rounded-full p-0.5 hover:ring-2 hover:ring-twt-teal/30 transition"
@@ -98,6 +101,7 @@ export default function Header() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         ) : null}
       </div>
     </motion.header>
