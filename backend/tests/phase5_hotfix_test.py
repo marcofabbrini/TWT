@@ -58,6 +58,9 @@ def _stop(owner, trip, title, location, start, end, transport="car"):
 
 
 def test_recompute_km_bumps_version_when_updates(owner, trip):
+    """After the initial inline recompute (from POST /stops), an explicit
+    /recompute-km is a no-op AND MUST NOT bump the version. This asserts the
+    version-bump path is guarded by 'something actually changed'."""
     _stop(owner, trip, "A", "Roma", "2026-06-01", "2026-06-02")
     _stop(owner, trip, "B", "Milano", "2026-06-03", "2026-06-04")
 
@@ -65,9 +68,9 @@ def test_recompute_km_bumps_version_when_updates(owner, trip):
     r = owner.post(f"/api/trips/{trip}/recompute-km")
     assert r.status_code == 200
     body = r.json()
-    assert body["updated_count"] > 0
+    assert body["updated_count"] == 0, body
     v1 = owner.get(f"/api/trips/{trip}/version").json()["version"]
-    assert v1 > v0, f"version should bump: {v0} -> {v1}"
+    assert v1 == v0, f"version must not bump when nothing changed: {v0} -> {v1}"
 
 
 def test_transport_other_is_not_an_error(owner, trip):

@@ -5,10 +5,31 @@ Covers gaps not in phase5_hotfix_test.py:
           last_updated_by == caller user_id and last_updated_at moves forward.
   FIX #2: 'other' counted in updated_count; multiple 'other' stops; mixed trip.
 """
+import asyncio
+import os
 import time
 
 import httpx
 import pytest
+from dotenv import dotenv_values
+from motor.motor_asyncio import AsyncIOMotorClient
+
+_be = dotenv_values("/app/backend/.env")
+MONGO_URL = (os.environ.get("MONGO_URL") or _be.get("MONGO_URL") or "").strip('"')
+DB_NAME = (os.environ.get("DB_NAME") or _be.get("DB_NAME") or "").strip('"')
+
+
+def _invalidate_stop_km(stop_id: str) -> int:
+    """Simulate stale persisted km so the next recompute registers a real change."""
+    async def _run():
+        cli = AsyncIOMotorClient(MONGO_URL)
+        try:
+            res = await cli[DB_NAME].stops.update_one(
+                {"stop_id": stop_id}, {"$set": {"km_from_prev": None, "km_calc_error": True}})
+            return res.matched_count
+        finally:
+            cli.close()
+    return asyncio.run(_run())
 
 API_URL = None
 
@@ -87,26 +108,32 @@ def test_no_version_bump_when_zero_stops(owner, trip):
 def test_version_bump_sets_last_updated_by_and_at(owner, trip):
     c, uid = owner
     _stop(c, trip, "A", "Roma", "2026-07-01", "2026-07-02")
-    _stop(c, trip, "B", "Firenze", "2026-07-03", "2026-07-04")
+    b = _stop(c, trip, "B", "Firenze", "2026-07-03", "2026-07-04")
+    # Hotfix v2: version only bumps when something actually changes — force a
+    # stale persisted value so the recompute has real work to do.
+    assert _invalidate_stop_km(b["stop_id"]) == 1
     v0 = _version(c, trip)
     time.sleep(1.1)
     r = c.post(f"/api/trips/{trip}/recompute-km")
     assert r.status_code == 200
-    assert r.json()["updated_count"] == 2, r.json()
+    assert r.json()["updated_count"] == 1, r.json()
     v1 = _version(c, trip)
     assert v1["version"] == v0["version"] + 1, (v0, v1)
     assert v1["last_updated_by"] == uid, v1
     assert v1["last_updated_at"] > v0["last_updated_at"], (v0, v1)
 
 
-def test_repeated_recompute_bumps_each_time(owner, trip):
+def test_repeated_recompute_never_bumps(owner, trip):
+    """Hotfix v2: repeated no-op recomputes must NOT bump the version."""
     c, _ = owner
     _stop(c, trip, "A", "Roma", "2026-07-01", "2026-07-02")
     _stop(c, trip, "B", "Napoli", "2026-07-03", "2026-07-04")
     v0 = _version(c, trip)["version"]
-    for i in range(1, 4):
-        assert c.post(f"/api/trips/{trip}/recompute-km").status_code == 200
-        assert _version(c, trip)["version"] == v0 + i
+    for _ in range(3):
+        r = c.post(f"/api/trips/{trip}/recompute-km")
+        assert r.status_code == 200
+        assert r.json()["updated_count"] == 0, r.json()
+        assert _version(c, trip)["version"] == v0
 
 
 # ── FIX #2 ───────────────────────────────────────────────
@@ -120,7 +147,8 @@ def test_other_counted_in_updated_count_and_km_totals(owner, trip):
 
     body = c.post(f"/api/trips/{trip}/recompute-km").json()
     assert body["errors"] == [], body
-    assert body["updated_count"] == 3, body
+    # Hotfix v2: values already correct from create-time recompute → nothing changed.
+    assert body["updated_count"] == 0, body
 
     stops = c.get(f"/api/trips/{trip}/stops").json()
     for sid in (o1["stop_id"], o2["stop_id"]):
@@ -140,7 +168,8 @@ def test_mixed_trip_only_real_errors_reported(owner, trip):
     assert bad["stop_id"] in body["errors"], body
     assert other["stop_id"] not in body["errors"], body
     assert good["stop_id"] not in body["errors"], body
-    assert body["updated_count"] == 3, body
+    # Hotfix v2: no-op recompute → updated_count 0.
+    assert body["updated_count"] == 0, body
 
     stops = {s["stop_id"]: s for s in c.get(f"/api/trips/{trip}/stops").json()}
     assert stops[good["stop_id"]]["km_from_prev"] == 574.0

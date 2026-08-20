@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 16 (backend only): reconfirmed Phase 5 recompute-km idempotency fix and verified the iteration-15 edge case (stale km_calc_error surviving manual override) is now fixed. Flipped the xfail in phase5_hotfix_v3_edge_test.py to hard asserts (a/b/c from the request) — it passes. Added phase5_hotfix_v4_test.py for the inverse path (override OFF restores real error). Full backend suite: 232 tests, 0 failures, 0 xfail.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/phase5_hotfix_v3_edge_test.py",
+    "/app/backend/tests/phase5_hotfix_v4_test.py",
+    "/app/test_reports/pytest/iteration16_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "stops.py update_stop clears km_calc_error inline when km_manual_override=True and distance.recompute_stop_km also clears it for override stops — duplicate-but-consistent logic; acceptable, but consider centralizing in the service to avoid future drift.",
+    "km_from_prev has no non-negative validation in StopUpdate; a manual override could persist a negative distance and skew km totals (minor, pre-existing)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/phase5_hotfix_v3_edge_test.py",
+    "/app/backend/tests/phase5_hotfix_v4_test.py"
+  ],
+  "success_rate": {"backend": "100% (232/232)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Ephemeral dev-login users p5v3edge@twt.app / p5v4@twt.app with TEST_ trips, deleted in fixture teardown.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Verified: (1) back-to-back /recompute-km on unchanged trip -> updated_count=0, /version unchanged; (2) PATCH {km_from_prev,km_manual_override:true} on an errored stop -> GET /stops immediately shows km_calc_error=false & km_from_prev=123, recompute errors[] excludes it, and subsequent recomputes stay updated_count=0 with no version bump; (3) transport='other' never errors; unknown-city stop stays sticky in errors[] until changed; manual override without prior error -> updated_count=0; (4) NEW: setting km_manual_override back to false restores km_calc_error=true and re-adds the stop to errors[] with updated_count=0 (no spurious bump). xfail decorator removed — suite now has 0 xfail. Frontend untested this iteration.",
+  "rca_of_the_issue": "Iteration-15 bug: recompute_stop_km returned the persisted (stale) old_err for override stops and PATCH never reset the flag, so an errored stop stayed in errors[] forever. Fixed by (a) recompute_stop_km forcing new_err=False and persisting km_calc_error=false for override stops (changed=True only on transition, preserving idempotency) and (b) update_stop setting km_calc_error=false synchronously whenever the PATCH body sets km_manual_override=true, so the immediate GET is clean. Both verified."
+}

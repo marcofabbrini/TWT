@@ -117,6 +117,9 @@ async def update_stop(
         _check_within_trip_range(trip, eff_start, eff_end)
 
     updates["updated_at"] = utcnow().isoformat()
+    # Clearing a stale km_calc_error when the user takes manual ownership of this leg.
+    if updates.get("km_manual_override") is True:
+        updates["km_calc_error"] = False
     await db.stops.update_one({"stop_id": stop_id}, {"$set": updates})
 
     # Recompute km if inputs relevant to routing changed (unless manual override is set).

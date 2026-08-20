@@ -212,53 +212,67 @@ async def compute_km(
 
 
 # ── High-level recompute for a trip ───────────────────
-async def recompute_stop_km(trip_id: str, stop_id: str) -> Tuple[Optional[float], bool]:
+async def recompute_stop_km(trip_id: str, stop_id: str) -> Tuple[Optional[float], bool, bool]:
     """Recompute km_from_prev for a single stop (respects manual_override).
-    Returns (km, error_flag). transport_mode='other' returns (None, False) —
-    a deliberate user choice, not an error.
+    Returns (km, error_flag, changed). `changed=True` iff the newly-computed
+    (km_from_prev, km_calc_error) pair differs from what is currently persisted.
+    transport_mode='other' returns error_flag=False (deliberate user choice).
     """
     stop = await db.stops.find_one({"stop_id": stop_id, "trip_id": trip_id}, {"_id": 0})
     if not stop:
-        return None, False
+        return None, False, False
+
+    old_km = stop.get("km_from_prev")
+    old_err = bool(stop.get("km_calc_error", False))
+
     if stop.get("km_manual_override"):
-        return stop.get("km_from_prev"), False
+        # Manual value is authoritative. Clear any stale error flag from a
+        # previous auto-calc failure — user has taken responsibility for this leg.
+        new_err = False
+        changed = old_err != new_err
+        if changed:
+            await db.stops.update_one(
+                {"stop_id": stop_id}, {"$set": {"km_calc_error": False}}
+            )
+        return old_km, new_err, changed
 
     transport = stop.get("transport_mode", "car")
 
-    # Find the previous stop by order.
     prev = await db.stops.find_one(
         {"trip_id": trip_id, "order": {"$lt": stop["order"]}},
         {"_id": 0, "location": 1, "order": 1},
         sort=[("order", -1)],
     )
     if not prev:
-        # First stop of the trip has no "from" — km is null (not an error).
-        await db.stops.update_one(
-            {"stop_id": stop_id}, {"$set": {"km_from_prev": None, "km_calc_error": False}}
-        )
-        return None, False
+        new_km, new_err = None, False
+    else:
+        km = await compute_km(prev["location"], stop["location"], transport)
+        is_other = transport == "other"
+        new_km = km
+        new_err = (km is None) and not is_other
 
-    km = await compute_km(prev["location"], stop["location"], transport)
-    is_other = transport == "other"
-    error_flag = (km is None) and not is_other
-    await db.stops.update_one(
-        {"stop_id": stop_id},
-        {"$set": {"km_from_prev": km, "km_calc_error": error_flag}},
-    )
-    return km, error_flag
+    changed = (old_km != new_km) or (old_err != new_err)
+    if changed:
+        await db.stops.update_one(
+            {"stop_id": stop_id},
+            {"$set": {"km_from_prev": new_km, "km_calc_error": new_err}},
+        )
+    return new_km, new_err, changed
 
 
 async def recompute_trip_km(trip_id: str) -> dict:
-    """Recompute km for every stop of the trip. Returns {updated_count, errors:[stop_id]}."""
+    """Recompute km for every stop of the trip.
+    `updated_count` counts stops whose (km_from_prev, km_calc_error) changed.
+    `errors` lists stop_ids currently in error state (whether changed or not)."""
     stops = await db.stops.find(
         {"trip_id": trip_id}, {"_id": 0, "stop_id": 1}
     ).sort("order", 1).to_list(2000)
     updated = 0
     errors = []
     for s in stops:
-        km, err = await recompute_stop_km(trip_id, s["stop_id"])
+        km, err, changed = await recompute_stop_km(trip_id, s["stop_id"])
+        if changed:
+            updated += 1
         if err:
             errors.append(s["stop_id"])
-        else:
-            updated += 1
     return {"updated_count": updated, "errors": errors}

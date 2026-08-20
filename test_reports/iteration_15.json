@@ -1,0 +1,49 @@
+{
+  "summary": "Backend-only verification of TWT Phase 5 hotfix v2 (recompute-km idempotency). Wrote 8 new independent tests (7 in phase5_hotfix_v3_test.py + 1 edge test) including the requested POSITIVE change path via direct Mongo writes with motor, plus the reorder trick. New semantics verified correct: updated_count counts only stops whose (km_from_prev, km_calc_error) actually differ from persisted state; version bumps only when updated_count>0; manual-override stops never counted. Found 5 STALE tests in the existing suite still asserting the OLD semantics (dev agent only rewrote phase5_hotfix_test.py, missed phase5_hotfix_extra_test.py and phase5_test.py) - aligned those test-only assertions to the documented new spec. Final full-suite run: 231 tests, 230 passed + 1 documented xfail, 0 failures. One genuine minor bug found: km_calc_error is never cleared when a manual override is applied to a previously-errored stop, so that stop stays in errors[] forever.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/trips/{id}/recompute-km  +  PATCH /api/trips/{id}/stops/{stop_id}",
+        "issue": "Stale km_calc_error survives manual override. Repro: stop B with unknown city ('Qqx-Unknown-City', transport=car) -> km_calc_error=true. PATCH {km_from_prev:123, km_manual_override:true} succeeds, but km_calc_error stays true, so every subsequent recompute-km returns B in errors[] forever (updated_count=0, so it can never self-heal). Root cause: services/distance.py recompute_stop_km returns the persisted old_err verbatim for override stops (line ~230) and the stops PATCH handler does not reset km_calc_error when km_manual_override is set. Suggested fix: clear km_calc_error=false when km_manual_override becomes true with a non-null km_from_prev, and/or have recompute_stop_km report err=False for override stops with a value. Tracked as xfail in /app/backend/tests/phase5_hotfix_v3_edge_test.py."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/phase5_hotfix_v3_test.py",
+    "/app/backend/tests/phase5_hotfix_v3_edge_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix the stale km_calc_error on manual override (see backend_issues.minor). Remove the xfail marker in phase5_hotfix_v3_edge_test.py once fixed.",
+    "NOTE FOR DEV: the hotfix v2 rollout left 5 stale tests asserting the OLD semantics; I updated them (phase5_hotfix_extra_test.py x4, phase5_test.py x1). Please review my assertion changes for intent match - in particular test_repeated_recompute_bumps_each_time was renamed to test_repeated_recompute_never_bumps, and test_version_bump_sets_last_updated_by_and_at now forces a real change via a direct Mongo write so it still exercises the bump path.",
+    "Consider whether POST /stops/reorder should bump the version even when no km value changed (it currently always bumps). Probably correct since order itself changed, but it is inconsistent with the new recompute-km idempotency contract - worth an explicit decision."
+  ],
+  "critical_code_review_comments": [
+    "services/distance.py recompute_stop_km: the manual-override branch returns (old_km, old_err, False) - it propagates a possibly-stale old_err, which is the root cause of the sticky-error bug above. An override with a concrete km should never be an error.",
+    "services/distance.py recompute_trip_km: loops stops sequentially with one find_one + optional update_one per stop (N+1 round trips per recompute). Fine at current scale (limit 2000) but consider a single fetch + bulk_write if trips grow.",
+    "distance comparison old_km != new_km relies on exact float equality. Values are round()ed to 1 decimal everywhere so this is currently safe, but any change to rounding will silently reintroduce phantom 'changed' counts - worth a comment or an explicit tolerance helper.",
+    "Verified no MongoDB _id leakage in any of the km/stop/version responses."
+  ],
+  "updated_files": [
+    "/app/backend/tests/phase5_hotfix_v3_test.py",
+    "/app/backend/tests/phase5_hotfix_v3_edge_test.py",
+    "/app/backend/tests/phase5_hotfix_extra_test.py",
+    "/app/backend/tests/phase5_test.py"
+  ],
+  "success_rate": {
+    "backend": "100% (230 passed / 231 collected, 1 documented xfail for the known manual-override bug)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "Trips prefixed TEST_P5v3 / TEST_P5v3edge under dev-login users p5v3_owner@twt.app and p5v3edge@twt.app; all trips deleted in fixture teardown.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "dev-login (ENV=dev) per /app/memory/test_credentials.md; ORS_MOCK=1 confirmed set in /app/backend/.env",
+  "context_for_next_testing_agent": "Hotfix v2 idempotency semantics are CONFIRMED CORRECT and covered by /app/backend/tests/phase5_hotfix_v3_test.py (7 tests): 3x consecutive no-op recompute (updated_count=0, v0==v_final), stale-Mongo repair path (motor writes directly using MONGO_URL/DB_NAME from backend/.env -> updated_count>=1 + version bump + correct rewrite + follow-up no-op), stale-wrong-value overwrite, manual override 999 preserved, transport='other' never errored/never changed, unknown-city error sticky without version bump then flips once when resolved, and the reorder trick (A/C/B -> Roma->Napoli 225.0, follow-up explicit recompute is a no-op). IMPORTANT ENV NOTE: the public preview URL sits behind Cloudflare which returns HTTP 429 with a 'Just a moment...' challenge page if you run the full ~230-test suite twice back-to-back. This produced 5 spurious failures/errors on my second run (backend_test TestHealth::test_root, phase2 TestStopsPatch x3, phase4 TestRolePermissions::test_viewer_denied_all_mutations) which ALL passed after a ~3 minute cooldown. Wait 2-3 minutes between full-suite runs before reporting any 429 as a bug. Total suite is now 231 tests (~2 min wall clock with the configured -n 2 --dist loadscope).",
+  "rca_of_the_issue": "Hotfix v2 itself is correct: recompute_stop_km compares (new_km,new_err) vs persisted (old_km,old_err), skips the Mongo write when identical and returns changed=False, and notifications.py bumps the version only when updated_count>0 - so back-to-back recomputes are true no-ops. The 5 pre-existing test failures were NOT product regressions: they were assertions written against the pre-hotfix contract (updated_count == number of stops touched, version bumps on every call) that the dev agent forgot to migrate. The one real defect is narrow: for km_manual_override stops recompute_stop_km short-circuits and echoes the persisted km_calc_error instead of recomputing/clearing it, and the stops PATCH does not reset the flag either - so a stop that errored before the override is permanently pinned in the errors[] payload with no path to recovery (updated_count stays 0, so the version never bumps and the client never learns it is resolved)."
+}

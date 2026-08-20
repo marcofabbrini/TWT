@@ -297,7 +297,9 @@ class TestRecomputeKm:
         assert r.status_code == 200, r.text[:300]
         data = r.json()
         assert set(data.keys()) == {"updated_count", "errors"}
-        assert data["updated_count"] == 2, data
+        # Hotfix v2 semantics: create-time inline recompute already persisted the
+        # correct values, so an explicit recompute changes nothing → 0.
+        assert data["updated_count"] == 0, data
         assert len(data["errors"]) == 1, data
 
         ed, _ = dev_login_as(_uniq("p5rced_"), tid, "editor")
