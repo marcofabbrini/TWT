@@ -1,0 +1,119 @@
+"""Trips + Trip Members routes (Phase 1)."""
+import logging
+from datetime import datetime, date
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from db import db
+from models import Trip, TripCreate, TripWithRole, utcnow, new_id
+from auth import require_auth
+
+logger = logging.getLogger("twt.trips")
+router = APIRouter(prefix="/trips", tags=["trips"])
+
+
+def _serialize_trip(doc: dict) -> dict:
+    """Convert stored dates/datetimes for Pydantic parsing."""
+    out = {k: v for k, v in doc.items() if k != "_id"}
+    for k in ("start_date", "end_date"):
+        v = out.get(k)
+        if isinstance(v, str):
+            out[k] = date.fromisoformat(v)
+        elif isinstance(v, datetime):
+            out[k] = v.date()
+    for k in ("created_at", "updated_at"):
+        v = out.get(k)
+        if isinstance(v, str):
+            out[k] = datetime.fromisoformat(v)
+    return out
+
+
+async def _get_membership(trip_id: str, user_id: str) -> Optional[dict]:
+    return await db.trip_members.find_one(
+        {"trip_id": trip_id, "user_id": user_id, "status": "accepted"},
+        {"_id": 0},
+    )
+
+
+@router.post("", response_model=Trip, status_code=status.HTTP_201_CREATED)
+async def create_trip(body: TripCreate, current_user: dict = Depends(require_auth)):
+    trip_id = new_id("trip_")
+    trip_doc = {
+        "trip_id": trip_id,
+        "owner_id": current_user["user_id"],
+        "title": body.title.strip(),
+        "home_currency": body.home_currency,
+        "start_date": body.start_date.isoformat(),
+        "end_date": body.end_date.isoformat(),
+        "cover_image_url": body.cover_image_url,
+        "created_at": utcnow().isoformat(),
+        "updated_at": utcnow().isoformat(),
+    }
+    await db.trips.insert_one(trip_doc)
+
+    member_doc = {
+        "member_id": new_id("mem_"),
+        "trip_id": trip_id,
+        "user_id": current_user["user_id"],
+        "invited_email": current_user["email"],
+        "role": "owner",
+        "status": "accepted",
+        "created_at": utcnow().isoformat(),
+    }
+    await db.trip_members.insert_one(member_doc)
+
+    logger.info("trips.create trip_id=%s owner=%s", trip_id, current_user["user_id"])
+    return Trip(**_serialize_trip(trip_doc))
+
+
+@router.get("", response_model=List[TripWithRole])
+async def list_trips(current_user: dict = Depends(require_auth)):
+    memberships = await db.trip_members.find(
+        {"user_id": current_user["user_id"], "status": "accepted"},
+        {"_id": 0},
+    ).to_list(500)
+    if not memberships:
+        return []
+
+    role_by_trip = {m["trip_id"]: m["role"] for m in memberships}
+    trip_ids = list(role_by_trip.keys())
+    trip_docs = await db.trips.find({"trip_id": {"$in": trip_ids}}, {"_id": 0}).to_list(500)
+
+    result = []
+    for d in trip_docs:
+        s = _serialize_trip(d)
+        s["role"] = role_by_trip.get(d["trip_id"], "viewer")
+        result.append(TripWithRole(**s))
+    # Sort by start_date desc
+    result.sort(key=lambda t: t.start_date, reverse=True)
+    return result
+
+
+@router.get("/{trip_id}", response_model=TripWithRole)
+async def get_trip(trip_id: str, current_user: dict = Depends(require_auth)):
+    membership = await _get_membership(trip_id, current_user["user_id"])
+    if not membership:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    trip_doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    if not trip_doc:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    s = _serialize_trip(trip_doc)
+    s["role"] = membership["role"]
+    return TripWithRole(**s)
+
+
+@router.delete("/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_trip(trip_id: str, current_user: dict = Depends(require_auth)):
+    trip_doc = await db.trips.find_one({"trip_id": trip_id}, {"_id": 0})
+    if not trip_doc:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if trip_doc["owner_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Only the owner can delete this trip")
+
+    await db.trip_members.delete_many({"trip_id": trip_id})
+    await db.trips.delete_one({"trip_id": trip_id})
+    logger.info("trips.delete trip_id=%s by=%s", trip_id, current_user["user_id"])
+    return None

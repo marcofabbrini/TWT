@@ -1,0 +1,123 @@
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Sora:wght@300;400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* TWT dark palette mapped to shadcn tokens (dark by default) */
+    --background: 222 15% 5%;
+    --foreground: 218 25% 92%;
+    --card: 222 15% 7%;
+    --card-foreground: 218 25% 92%;
+    --popover: 222 15% 7%;
+    --popover-foreground: 218 25% 92%;
+    --primary: 172 74% 65%; /* teal accent */
+    --primary-foreground: 222 25% 8%;
+    --secondary: 220 12% 15%;
+    --secondary-foreground: 218 25% 92%;
+    --muted: 220 12% 12%;
+    --muted-foreground: 218 12% 62%;
+    --accent: 172 74% 65%;
+    --accent-foreground: 222 25% 8%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 218 25% 96%;
+    --border: 220 14% 15%;
+    --input: 220 14% 15%;
+    --ring: 172 74% 55%;
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html,
+  body {
+    background: #08090c;
+    color: #e7ecf3;
+    font-family: "Sora", ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background-image:
+      radial-gradient(
+        1200px 700px at 15% -10%,
+        rgba(94, 234, 212, 0.09),
+        transparent 60%
+      ),
+      radial-gradient(
+        900px 600px at 100% 100%,
+        rgba(245, 184, 65, 0.06),
+        transparent 60%
+      ),
+      linear-gradient(180deg, #08090c 0%, #0a0b10 100%);
+  }
+
+  ::selection {
+    background: rgba(94, 234, 212, 0.35);
+    color: #08090c;
+  }
+}
+
+@layer components {
+  .glass {
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+  }
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.055);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+  }
+  .glass-hover {
+    transition:
+      background-color 300ms ease,
+      border-color 300ms ease,
+      transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .glass-hover:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(94, 234, 212, 0.28);
+  }
+  .text-display {
+    font-family: "Instrument Serif", serif;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+  .noise::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+  .divider-dot {
+    width: 3px;
+    height: 3px;
+    border-radius: 999px;
+    background: rgba(231, 236, 243, 0.4);
+    display: inline-block;
+  }
+}
+
+@layer utilities {
+  .glow-teal {
+    box-shadow:
+      0 0 0 1px rgba(94, 234, 212, 0.4),
+      0 10px 40px -10px rgba(94, 234, 212, 0.35);
+  }
+  .ring-teal {
+    box-shadow: 0 0 0 2px rgba(94, 234, 212, 0.25);
+  }
+}
