@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 18 — Trip Map feature (backend GET /api/trips/{trip_id}/route-geometry + route_cache, frontend TripMap.jsx). Backend: 14/14 pytest tests pass (auth 401/404/200 for owner+editor+viewer, payload shape, 0/1/2 stops, car ORS live geojson (LineString 1849-3117 pts), plane haversine-only with zero route_cache entries, other all-null, route_cache write + cache-hit, regression on 12 existing endpoints + openapi). Frontend: full Playwright e2e on seeded trip TEST_MAP_UI (Roma/car → Firenze/train → London/plane → Napoli/other): wrapper above timeline, default-open, localStorage persistence across reload, legend chips, numbered pins, marker popup + Go-to-stop scroll, polyline popups for train/plane/other, Nunito on Dashboard+Trip h1, Landing/Dashboard regression OK. One UX defect found: marker click auto-scrolls page so its own popup goes off-screen.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/trips/{trip_id}/route-geometry", "issue": "ORS geometry is returned unsimplified (1849-3117 coordinate pairs per segment; 41KB for a 4-stop trip, would be several hundred KB for 10+ stops). Consider ORS geometry_simplify=true or server-side douglas-peucker before caching."},
+      {"endpoint": "GET /api/trips/{trip_id}/route-geometry", "issue": "No per-request cap on ORS fan-out: a trip with N stops fires N-1 concurrent ORS calls on a cold cache — with the free-tier 40 req/min key this will 429 on large trips (degrades gracefully to dashed lines, but silently). Consider sequential/semaphore-limited fetching."},
+      {"endpoint": "GET /api/trips/{trip_id}/route-geometry", "issue": "Cache is keyed only on coords+mode with no version/provider field, so a future ORS profile/format change cannot be invalidated without dropping the collection."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TripMap.jsx (Marker eventHandlers)", "issue": "Clicking a numbered pin fires BOTH the popup and scrollToStop() (Marker eventHandlers.click -> scrollToStop). Measured: scrollY 0 -> 764 and the freshly-opened popup ends up at y=-378 (above the viewport/behind the sticky header), so the popup content and its own 'Go to stop' button are unreachable. The scroll-on-click also duplicates the dedicated button. Recommend removing eventHandlers={{click: scrollToStop}} from <Marker> and keeping only the popup button.", "selector": ".twt-map-pin / [data-testid=trip-map-marker-popup-<stop_id>]", "priority": "MEDIUM-HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Trip page — Trip map", "issues": ["transport_mode='other' renders a dashed grey line identical in style to the ORS-failure fallback dash, so a user cannot distinguish 'not applicable' from 'route unavailable' (popup text differs: 'Not calculated'). Minor: consider a distinct style or no line for 'other'."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/trip_map_test.py",
+    "/app/test_reports/pytest/iteration18_map.xml",
+    "/app/test_reports/seed_map.py"
+  ],
+  "action_items": [
+    "Remove the Marker-level click->scrollToStop handler in TripMap.jsx (popup jumps off-screen after opening).",
+    "Optional: simplify/limit ORS geometry payload and throttle concurrent ORS calls for long trips."
+  ],
+  "critical_code_review_comments": [
+    "map_routes.py fires len(stops)-1 concurrent ORS requests via asyncio.gather on a cold cache — add a semaphore (e.g. 3) to stay under the free-tier rate limit.",
+    "Negative ORS results are not cached, so a rate-limited/unroutable pair re-hits ORS (4s timeout) on every page open; consider caching a null-geometry sentinel with a short TTL.",
+    "route_cache docs are correctly quantised to 4 decimals and API responses exclude _id (verified) — good.",
+    "TripMap.jsx is 455 lines and mixes helpers (arc math, formatters, icon builder) with the component; extracting helpers would help but not blocking."
+  ],
+  "updated_files": [
+    "/app/backend/tests/trip_map_test.py",
+    "/app/test_reports/seed_map.py"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "92% (12/13 checks; marker-click auto-scroll defect)"},
+  "seed_data_creation": "User mapui@twt.app, trip 'TEST_MAP_UI' (trip_9a52a111dec5427c) with 4 stops Roma(car)/Firenze(train)/London(plane)/Napoli(other). Reproducible via `python3 /app/test_reports/seed_map.py`. Backend test trips are auto-deleted in teardown.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "POST /api/auth/dev-login {email} — mapui@twt.app (UI seed), mapowner@twt.app (backend tests). ENV=dev.",
+  "context_for_next_testing_agent": "Backend .env has ORS_MOCK=0 (live) and it works — real LineString geometry + route_cache records verified (Roma->Milano 572km, Firenze->Bologna 118km). Do NOT flip to ORS_MOCK=1 unless needed; in mock mode geojson is null and the cache test self-skips. Playwright: dev-login via page.request.post shares the context cookie jar; Leaflet marker AND polyline clicks work by dispatching mousedown+mouseup+click MouseEvents with clientX/clientY at the element bbox center (Playwright force click does not). Route popup testids verified for train/plane/other. Seed trip trip_9a52a111dec5427c persists.",
+  "rca_of_the_issue": "Marker popup off-screen: TripMap.jsx <Marker eventHandlers={{click: () => scrollToStop(s.stop_id)}}>. Leaflet opens the bound Popup on the same click, then the smooth scrollIntoView({block:'center'}) moves the stop card into view, translating the map (and its popup) out of the viewport. Repro: open /trip/<id>, dispatch a native click on the 2nd .twt-map-pin -> window.scrollY 0->764, popup boundingRect.y = -378."
+}

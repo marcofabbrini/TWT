@@ -129,3 +129,21 @@ Build TWT (Trip Without Trap), a FARM-stack web app (FastAPI + React + MongoDB) 
 - **Task 2 — Dashboard summary**: `GET /api/trips` now returns per-trip `summary` `{ total_km, total_cost_home_currency, home_currency, has_missing_rates }` computed in bounded queries (1 trip_members + 1 trips + 5 batched children via `asyncio.gather` — no N+1). `TripCard.jsx` renders km with locale thousands separator (`— km` when null), cost via `Intl.NumberFormat` currency, and amber `AlertTriangle` + tooltip "Alcuni costi esclusi (tassi mancanti)" when rates missing.
 - **Regression**: 241/241 backend tests pass (9 new in `tests/trip_summary_test.py`). Frontend Playwright verified all three states (full / missing / empty).
 - **Cancelled**: Phase 6 (Emails + FX API). MVP delivered.
+
+## Trip Map (Feb 2026)
+- **New collection `route_cache`**: 30-day TTL, compound unique index on quantised coords (round 4 decimals) + transport_mode. Persists ORS Directions geometry to avoid re-hitting the rate-limited API.
+- **New endpoint `GET /api/trips/{trip_id}/route-geometry`**: returns `{ stops: [{stop_id, order, title, location, transport_mode, coords, ...}], routes: [{from_stop_id, to_stop_id, transport_mode, geojson, distance_m, duration_s}] }`.
+  - car/walk/train → ORS Directions (train uses driving-car), cache-through.
+  - plane → NO ORS call, haversine only, `geojson=null` (frontend draws arc).
+  - other → no ORS call, all null.
+  - ORS timeout 4s; on failure `geojson=null`, falls back to `stops.km_from_prev * 1000` as distance if available.
+- **Frontend `TripMap.jsx`** (lazy-loaded): shadcn Collapsible with `defaultOpen=true`, state persisted in `localStorage.tripmap-open-<tripId>`. Uses `react-leaflet` + OSM tiles.
+  - Custom numbered `L.divIcon` markers (teal glass pill).
+  - Legend chips per transport mode present.
+  - Marker click → auto-scroll to `[data-testid=stop-card-<id>]` + popup with title/location/dates/"Go to stop" button.
+  - Polyline click → popup with `From → To`, transport label, distance (Intl km) and duration (h m).
+  - Plane routes render as bezier arcs computed locally (pink `#EC4899`).
+  - Car teal, walk amber, train violet, plane pink; fallback = dashed color of the mode.
+  - Auto fit-bounds on data change.
+  - Legal OSM attribution kept visible (styled dark).
+- **Bundle**: leaflet + react-leaflet added to package.json; lazy-loaded so it does not enter the Dashboard bundle.

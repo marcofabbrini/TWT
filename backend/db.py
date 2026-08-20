@@ -73,4 +73,17 @@ async def ensure_indexes() -> None:
     await db.geocode_cache.create_index("key", unique=True)
     await db.geocode_cache.create_index("cached_at", expireAfterSeconds=60 * 60 * 24 * 30)
 
+    # route_cache (Map) — 30 day TTL, compound unique on quantised coords + mode
+    await db.route_cache.create_index(
+        [
+            ("from_lng", ASCENDING),
+            ("from_lat", ASCENDING),
+            ("to_lng", ASCENDING),
+            ("to_lat", ASCENDING),
+            ("transport_mode", ASCENDING),
+        ],
+        unique=True,
+    )
+    await db.route_cache.create_index("cached_at", expireAfterSeconds=60 * 60 * 24 * 30)
+
     logger.info("MongoDB indexes ensured")

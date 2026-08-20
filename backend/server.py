@@ -28,6 +28,7 @@ from exchange_rates import router as rates_router  # noqa: E402
 from summary import router as summary_router  # noqa: E402
 from members import trip_router as members_trip_router, invites_router  # noqa: E402
 from notifications import trip_router as km_trip_router, notif_router  # noqa: E402
+from map_routes import router as map_router  # noqa: E402
 
 app = FastAPI(
     title="TWT — Trip Without Trap",
@@ -64,6 +65,7 @@ api_router.include_router(members_trip_router)
 api_router.include_router(invites_router)
 api_router.include_router(km_trip_router)
 api_router.include_router(notif_router)
+api_router.include_router(map_router)
 app.include_router(api_router)
 
 # CORS — allow credentials so the httpOnly cookie flows in cross-origin requests.

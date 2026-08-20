@@ -1,6 +1,6 @@
 // PresencePod is defined at the bottom of the file.
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, Suspense, lazy } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -35,6 +35,8 @@ import EditTripModal from "@/components/EditTripModal";
 import useDndReorder from "@/hooks/useDndReorder";
 import useTripSync from "@/hooks/useTripSync";
 import useTripPresence from "@/hooks/useTripPresence";
+
+const TripMap = lazy(() => import("@/components/trip/TripMap"));
 
 import { api } from "@/lib/api";
 import { canEdit as canEditRole } from "@/lib/permissions";
@@ -398,6 +400,11 @@ export default function Trip() {
       </div>
 
       <main className="max-w-4xl mx-auto px-6 py-10">
+        {stops.length > 0 && (
+          <Suspense fallback={<div className="mb-8 h-16 rounded-2xl glass" data-testid="trip-map-suspense" />}>
+            <TripMap tripId={trip_id} syncVersion={trip?.version || 0} />
+          </Suspense>
+        )}
         {stops.length === 0 ? (
           <EmptyStops editable={editable} onCreate={() => setStopModal({ open: true, editing: null })} />
         ) : (
